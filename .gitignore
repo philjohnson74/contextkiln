@@ -1,0 +1,42 @@
+# Secrets
+.env
+.env.*
+!.env.sample
+
+# Agent output and worktrees (may contain prompts and file contents)
+agents/
+trees/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+npm-debug.log*
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local model weights and caches
+*.gguf
+*.safetensors
+*.mlx
+models/
+.cache/
+
+# Logs
+*.log
+
+# OS and editors
+.DS_Store
+.vscode/
+.idea/
+*.swp
