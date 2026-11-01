@@ -130,6 +130,15 @@ OUTPUT_JSON = "cc_raw_output.json"
 FINAL_OBJECT_JSON = "cc_final_object.json"
 SUMMARY_JSON = "custom_summary_output.json"
 
+# One line per agent run, for comparing models. __file__ is in adws/adw_modules/.
+RUNS_LOG = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "agents",
+    "runs.jsonl",
+)
+
+DEFAULT_AGENT_TIMEOUT_SECONDS = 1800
+
 
 def generate_short_id() -> str:
     """Generate a short 8-character UUID for tracking."""
@@ -368,14 +377,16 @@ def prompt_claude_code_with_retry(
         last_response = response
 
         # Check if we should retry based on the retry code
-        if response.success or response.retry_code == RetryCode.NONE:
+        if response.success or response.retry_code in [
+            RetryCode.NONE,
+            RetryCode.TIMEOUT_ERROR,  # A hung model would only hang again
+        ]:
             # Success or non-retryable error
             return response
 
         # Check if this is a retryable error
         if response.retry_code in [
             RetryCode.CLAUDE_CODE_ERROR,
-            RetryCode.TIMEOUT_ERROR,
             RetryCode.EXECUTION_ERROR,
             RetryCode.ERROR_DURING_EXECUTION,
         ]:
@@ -388,8 +399,42 @@ def prompt_claude_code_with_retry(
     return last_response
 
 
+def append_run_log(
+    request: AgentPromptRequest, response: AgentPromptResponse, wall_ms: int
+) -> None:
+    """Append one line to the run log. A logging failure never fails the run."""
+    # Use Claude Code's own numbers, falling back to wall time if it never finished
+    _, result_message = parse_jsonl_output(request.output_file)
+    result_message = result_message or {}
+
+    entry = {
+        "adw_id": request.adw_id,
+        "step": request.agent_name,
+        "profile": request.profile,
+        "model": get_profile(request.profile).model,
+        "duration_ms": result_message.get("duration_ms", wall_ms),
+        "num_turns": result_message.get("num_turns"),
+        "success": response.success,
+    }
+
+    try:
+        os.makedirs(os.path.dirname(RUNS_LOG), exist_ok=True)
+        with open(RUNS_LOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        print(f"Warning: could not write run log: {e}", file=sys.stderr)
+
+
 def prompt_claude_code(request: AgentPromptRequest) -> AgentPromptResponse:
-    """Execute Claude Code with the given prompt configuration."""
+    """Execute Claude Code with the given prompt configuration and log the run."""
+    started = time.monotonic()
+    response = _execute_claude_code(request)
+    append_run_log(request, response, int((time.monotonic() - started) * 1000))
+    return response
+
+
+def _execute_claude_code(request: AgentPromptRequest) -> AgentPromptResponse:
+    """Run the claude subprocess and parse its output."""
 
     # Check if Claude Code CLI is installed
     error_msg = check_claude_installed()
@@ -428,6 +473,10 @@ def prompt_claude_code(request: AgentPromptRequest) -> AgentPromptResponse:
     # Set up environment with only required variables
     env = get_claude_env(request.profile)
 
+    timeout_seconds = int(
+        os.getenv("ADW_AGENT_TIMEOUT_SECONDS", DEFAULT_AGENT_TIMEOUT_SECONDS)
+    )
+
     try:
         # Open output file for streaming
         with open(request.output_file, "w") as output_f:
@@ -439,6 +488,7 @@ def prompt_claude_code(request: AgentPromptRequest) -> AgentPromptResponse:
                 text=True,
                 env=env,
                 cwd=request.working_dir,  # Use working_dir if provided
+                timeout=timeout_seconds,
             )
 
         if result.returncode == 0:
@@ -581,7 +631,7 @@ def prompt_claude_code(request: AgentPromptRequest) -> AgentPromptResponse:
             )
 
     except subprocess.TimeoutExpired:
-        error_msg = "Error: Claude Code command timed out after 5 minutes"
+        error_msg = f"Error: Claude Code command timed out after {timeout_seconds} seconds"
         return AgentPromptResponse(
             output=error_msg,
             success=False,
