@@ -4,6 +4,7 @@ Executable scripts that combine deterministic Python with Claude Code agents. Ea
 
 | Script | What it does |
 |---|---|
+| `adw_health_check.py` | Checks the tools and, for `--profile local`, the Ollama server, model, tool calling and context length. Exits 1 if anything fails |
 | `adw_prompt.py "<prompt>"` | Runs an ad hoc prompt |
 | `adw_slash_command.py /<command> [args]` | Runs one command from `.claude/commands/` |
 | `adw_chore_implement.py "<prompt>"` | Runs `/chore`, then `/implement` on the resulting plan |
@@ -23,6 +24,10 @@ Each run writes to `agents/{adw_id}/{agent_name}/` (gitignored):
 | `custom_summary_output.json` | Summary of the run |
 
 Claude Code's `success` result only means the session ended normally, not that the work got done. Check the outcome separately, for example by running the tests.
+
+Every agent attempt also appends a line to `agents/runs.jsonl`, with `adw_id`, `step`, `profile`, `model`, `duration_ms`, `num_turns` and `success`. Retries get their own lines. `num_turns` is `null` if Claude Code never finished.
+
+An agent is stopped after `ADW_AGENT_TIMEOUT_SECONDS` (default `1800`). Timeouts aren't retried.
 
 ## Models
 
