@@ -23,8 +23,8 @@ Usage:
     uv run adws/adw_feature_implement.py "Add markdown rendering to chat replies"
 
 Examples:
-    # Run with specific model
-    ./adws/adw_feature_implement.py "Add a conversation history sidebar" --model opus
+    # Run with a specific model profile
+    ./adws/adw_feature_implement.py "Add a conversation history sidebar" --profile claude-opus
 
     # Run from a different working directory
     ./adws/adw_feature_implement.py "Add an escalation summary" --working-dir /path/to/project
@@ -53,6 +53,7 @@ from agent import (
     execute_template,
     generate_short_id,
 )
+from models import DEFAULT_PROFILE, PROFILE_NAMES, get_profile
 
 # Output file name constants
 OUTPUT_JSONL = "cc_raw_output.jsonl"
@@ -89,10 +90,12 @@ def extract_plan_path(output: str) -> str:
 @click.command()
 @click.argument("prompt", required=True)
 @click.option(
-    "--model",
-    type=click.Choice(["sonnet", "opus"]),
-    default="sonnet",
-    help="Claude model to use",
+    "--profile",
+    type=click.Choice(PROFILE_NAMES),
+    envvar="ADW_PROFILE",
+    default=DEFAULT_PROFILE,
+    show_default=True,
+    help="Model profile to use (default can be set with ADW_PROFILE)",
 )
 @click.option(
     "--working-dir",
@@ -101,11 +104,12 @@ def extract_plan_path(output: str) -> str:
 )
 def main(
     prompt: str,
-    model: str,
+    profile: str,
     working_dir: str,
 ):
     """Run feature planning and implementation workflow."""
     console = Console()
+    model = get_profile(profile).model
 
     # Generate a unique ID for this workflow
     adw_id = generate_short_id()
@@ -122,6 +126,7 @@ def main(
         Panel(
             f"[bold blue]ADW Feature & Implement Workflow[/bold blue]\n\n"
             f"[cyan]ADW ID:[/cyan] {adw_id}\n"
+            f"[cyan]Profile:[/cyan] {profile}\n"
             f"[cyan]Model:[/cyan] {model}\n"
             f"[cyan]Working Dir:[/cyan] {working_dir}",
             title="[bold blue]🚀 Workflow Configuration[/bold blue]",
@@ -140,7 +145,7 @@ def main(
         slash_command="/feature",
         args=[adw_id, prompt],
         adw_id=adw_id,
-        model=model,
+        profile=profile,
         working_dir=working_dir,
     )
 
@@ -226,6 +231,7 @@ def main(
                     "slash_command": "/feature",
                     "args": [adw_id, prompt],
                     "path_to_slash_command_prompt": ".claude/commands/feature.md",
+                    "profile": profile,
                     "model": model,
                     "working_dir": working_dir,
                     "success": feature_response.success,
@@ -290,7 +296,7 @@ def main(
             slash_command="/implement",
             args=[plan_path],
             adw_id=adw_id,
-            model=model,
+            profile=profile,
             working_dir=working_dir,
         )
 
@@ -358,6 +364,7 @@ def main(
                     "slash_command": "/implement",
                     "args": [plan_path],
                     "path_to_slash_command_prompt": ".claude/commands/implement.md",
+                    "profile": profile,
                     "model": model,
                     "working_dir": working_dir,
                     "success": implement_response.success,
@@ -445,6 +452,7 @@ def main(
                     "workflow": "feature_implement",
                     "adw_id": adw_id,
                     "prompt": prompt,
+                    "profile": profile,
                     "model": model,
                     "working_dir": working_dir,
                     "plan_path": plan_path,

@@ -26,4 +26,22 @@ Claude Code's `success` result only means the session ended normally, not that t
 
 ## Models
 
-Scripts currently accept `--model sonnet|opus`. Phase 3 of `PLAN.md` adds `--profile claude|claude-opus|local`, along with `models.py`, `git_ops.py` and `github.py`.
+Every script takes `--profile`, which picks the model and the environment that routes Claude Code to it. Without the option, scripts use `ADW_PROFILE` from the environment or `.env`, then `claude`. Profiles are defined in `adw_modules/models.py`.
+
+| Profile | Model | Runs on |
+|---|---|---|
+| `claude` | `sonnet` | Anthropic |
+| `claude-opus` | `opus` | Anthropic |
+| `local` | `LOCAL_MODEL`, default `qwen3-coder:30b` | Ollama at `LOCAL_BASE_URL`, default `http://localhost:11434` |
+
+`LOCAL_CONTEXT_LENGTH` (default `65536`) must match `OLLAMA_CONTEXT_LENGTH` on the server. See [local_models.md](../ai_docs/local_models.md) for why.
+
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` set in your shell are ignored, so only the profile decides where a run goes.
+
+## Tests
+
+```bash
+uv run --with pytest --with pydantic --with python-dotenv pytest adws/tests
+```
+
+Phase 3 of `PLAN.md` still has to add `git_ops.py` and `github.py`.
