@@ -225,6 +225,26 @@ alias claude-local='ANTHROPIC_BASE_URL=http://localhost:11434 ANTHROPIC_AUTH_TOK
   - `--permission-mode acceptEdits --allowedTools "Bash(python3:*)"`, or
   - `--dangerously-skip-permissions` (what the TAC-8 ADWs use; only inside a throwaway or git-tracked repo).
 
+## ADW lifecycle on `qwen3-coder:30b`
+
+**2026-11-01.** One run per profile of `adw_chore_implement.py`, each on a different small README task, so this isn't a fair benchmark.
+
+| Step | `local` | `claude` (Sonnet) |
+|---|---|---|
+| Plan | 31.2 s, 9 turns | 18.3 s, 4 turns |
+| Build | 7.3 s, 1 turn | 18.9 s, 5 turns |
+| Commit message | 23.2 s, 6 turns | 3.7 s, 2 turns |
+| PR text | 27.0 s, 11 turns | 4.6 s, 2 turns |
+| **Total** | **88.6 s** | **45.5 s** |
+
+- **Outcome:** the local model planned and built a correct one-sentence change, and its PR text was valid JSON. This is the first `/chore` → `/implement` cycle run entirely on a local model, on a trivial task.
+- **`/commit` is its weak spot:**
+  - In one run it added a preamble and invented details, saying `git_ops.py` handles cloning.
+  - In another it returned a paragraph with no commit message at all, so the Python fallback wrote the subject.
+  - ADWs keep only a valid conventional subject line for this reason. The format is checked, but accuracy isn't.
+- **Stray tag:** replies sometimes end with a literal `<tool_call>`. Validate model text rather than using it directly.
+- **Split-profile run, planning on Sonnet and building locally:** a one-sentence change took 11.1 s to plan and 23.7 s to build, and the diff was correct.
+
 ## To do
 
 - Measure prompt eval with a ~20k-token prompt, which is closer to a real Claude Code turn.

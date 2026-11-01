@@ -11,14 +11,14 @@ You also want to learn about open models along the way, so Phase 1 is an experim
 
 ## Current status and decisions (updated 2026-11-01)
 
-**Phase 2 is complete. Phase 3 is next.** These decisions override anything later in this plan that assumes otherwise, including mentions of a public repo in Phases 5–7 and the risks section.
+**Phases 2, 3 and 4 are complete. Phase 5 is next.** These decisions override anything later in this plan that assumes otherwise, including mentions of a public repo in Phases 5–7 and the risks section.
 
 | Decision | Detail | What it means |
 |---|---|---|
 | **The repo is private** | [`philjohnson74/contextkiln`](https://github.com/philjohnson74/contextkiln). The copied TAC-8 code has no visible licence, and its origin may be private course material. | **Check the TAC-8 terms, or replace the copied code, before going public.** Keep following the public-repo hygiene rules so the repo stays ready for it. |
 | **Licence is FSL-1.1-MIT** | Each version becomes available under MIT two years after release. The copyright holder is currently `philjohnson74`. | The licence only covers code we own, so it doesn't settle the TAC-8 question. |
 | **`main` has no branch protection** | The current GitHub plan doesn't offer it for private repos. | GitHub won't block a push to `main` or a merge that skips checks, so ADW code has to enforce both. See Phases 3 and 5. |
-| **Claude Code can't run `gh` or `git push` in this repo** | They're in the `deny` list in `.claude/settings.json`. This applies to interactive sessions as well as agents. | ADW Python code runs them directly, which the deny rules don't affect. Otherwise you run them yourself. |
+| **Claude Code can't change git state or run `gh` in this repo** | `gh` and `git push`, `add`, `commit`, `checkout`, `switch`, `merge` and `rebase` are in the `deny` list in `.claude/settings.json`. This applies to interactive sessions as well as agents. | ADW Python code runs them directly, which the deny rules don't affect. Otherwise you run them yourself. |
 
 ---
 
@@ -156,7 +156,16 @@ Steps:
 
 ## Phase 3: Make the agentic layer model-pluggable (~1 session)
 
-This is the bridge between the TAC-8 layer and the open-model experiments.
+**Done on 2026-11-01, with changes.** The steps below are the original plan. What differs:
+
+- `--profile` replaces `--model`, and the local profile also sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS`.
+- Routing variables come only from the profile, never from the shell.
+- Agents time out after `ADW_AGENT_TIMEOUT_SECONDS`, and timeouts aren't retried.
+- `git_ops.py`, `github.py`, `lifecycle.py`, `/commit` and `/pull_request` were written from scratch rather than adapted from TAC-8, to avoid adding to the licence question.
+- `scripts/test.sh` exists early and runs `adws/tests/`. Phase 4 should add the backend and frontend suites to it.
+- The done test used two small README chores instead of `/health`, because there's no backend until Phase 4 ([#6](https://github.com/philjohnson74/contextkiln/pull/6) on `local`, [#7](https://github.com/philjohnson74/contextkiln/pull/7) on `claude`).
+
+`--issue` hasn't had a live run yet, so check the first PR made from a real issue closely.
 
 - **`adw_modules/models.py`** defines named profiles:
   ```python
@@ -204,6 +213,8 @@ Every ADW runs through the same deterministic wrapper in Python code, not in pro
 ---
 
 ## Phase 4: ContextKiln MVP shell (the application layer)
+
+**Done on 2026-11-01.** See `app_docs/app-shell.md`. `AnthropicProvider` is still to come, as planned.
 
 Keep this deliberately thin. It's the canvas the ADWs paint on. **Build only the skeleton by hand (or with interactive Claude Code); everything after that goes through ADWs.**
 

@@ -1,0 +1,130 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --text: #1c1c1e;
+  --muted: #6b6b70;
+  --border: #d9d9de;
+  --user-bg: #1f5fbf;
+  --user-text: #ffffff;
+  --reply-bg: #f0f0f3;
+  --error: #b3261e;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181a;
+    --text: #ececef;
+    --muted: #a0a0a8;
+    --border: #3a3a40;
+    --user-bg: #2f6fd0;
+    --reply-bg: #27272b;
+    --error: #ff8a80;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-header h1 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
+  overflow-y: auto;
+}
+
+.message {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--user-bg);
+  color: var(--user-text);
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: var(--reply-bg);
+}
+
+.empty,
+.status {
+  margin: 0;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  color: var(--error);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.composer input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+button {
+  padding: 10px 14px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

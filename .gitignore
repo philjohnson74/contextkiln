@@ -32,8 +32,9 @@ npm-debug.log*
 models/
 .cache/
 
-# Logs
+# Logs and PID files from scripts/start.sh
 *.log
+.run/
 
 # OS and editors
 .DS_Store
