@@ -7,12 +7,32 @@ Executable scripts that combine deterministic Python with Claude Code agents. Ea
 | `adw_health_check.py` | Checks the tools and, for `--profile local`, the Ollama server, model, tool calling and context length. Exits 1 if anything fails |
 | `adw_prompt.py "<prompt>"` | Runs an ad hoc prompt |
 | `adw_slash_command.py /<command> [args]` | Runs one command from `.claude/commands/` |
-| `adw_chore_implement.py "<prompt>"` | Runs `/chore`, then `/implement` on the resulting plan |
-| `adw_feature_implement.py "<prompt>"` | Runs `/feature`, then `/implement` on the resulting plan |
+| `adw_chore_implement.py "<prompt>"` | Plans and builds a chore with `/chore` and `/implement`, then opens a PR |
+| `adw_feature_implement.py "<prompt>"` | Plans and builds a feature with `/feature` and `/implement`, then opens a PR |
 
 `adw_modules/agent.py` builds the `claude` subprocess call, filters its environment, handles retries and parses the stream-json output.
 
-`adw_modules/git_ops.py` and `adw_modules/github.py` run git and `gh` from Python, so agents don't have to. `git_ops.py` refuses to commit or push on `main`, and checks before each one that an agent hasn't switched branches. `.claude/commands/commit.md` and `pull_request.md` only write the text. Phase 3 of `PLAN.md` still has to connect these to the composed ADWs.
+`adw_modules/git_ops.py` and `adw_modules/github.py` run git and `gh` from Python, so agents don't have to. `git_ops.py` refuses to commit or push on `main`, and checks before each one that an agent hasn't switched branches. `.claude/commands/commit.md` and `pull_request.md` only write the text.
+
+## Lifecycle
+
+The chore and feature ADWs share `adw_modules/lifecycle.py`, which runs these steps in Python:
+
+1. **Health check** for each profile in use.
+2. **Sync:** abort if the working tree isn't clean, then fast-forward `main`.
+3. **Branch:** create `adw/{type}-{adw_id}-{slug}`.
+4. **Plan and build:** run the agents. It fails if the spec file is missing or the build changed nothing, whatever the agent reports.
+5. **Verify:** run `scripts/test.sh`.
+6. **Commit:** only the subject line of the agent's message is used, and only if it's in conventional format. Otherwise Python writes one.
+7. **Push and open a PR:** a failing test run opens a draft, with the output in the body, and the script exits 1.
+8. **Return to `main`.**
+
+If a step fails, the checkout stays on the work branch so you can inspect it. Commit, stash or discard that work before the next run. You still review and merge every PR.
+
+| Option | What it does |
+|---|---|
+| `--issue N` | Uses the issue as the prompt, in place of `<prompt>`. The issue text is passed to agents as untrusted input. The ADW comments on the issue, and the PR closes it |
+| `--no-pr` | Commits to a local branch, with no push, PR or issue comments. It still fetches `main` |
 
 ## Output
 

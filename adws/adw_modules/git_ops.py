@@ -61,6 +61,13 @@ def is_clean(cwd: Optional[str] = None) -> bool:
     return _git(["status", "--porcelain"], cwd) == ""
 
 
+def changed_files(cwd: Optional[str] = None) -> List[str]:
+    """Return every file that differs from main, committed or not, including new ones."""
+    tracked = _git(["diff", "--name-only", MAIN_BRANCH], cwd).splitlines()
+    untracked = _git(["ls-files", "--others", "--exclude-standard"], cwd).splitlines()
+    return sorted(set(tracked) | set(untracked))
+
+
 def sync_main(cwd: Optional[str] = None) -> None:
     """Check out main and fast-forward it to the remote.
 
