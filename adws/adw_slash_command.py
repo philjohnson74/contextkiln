@@ -25,8 +25,8 @@ Examples:
     # Run a slash command
     ./adws/adw_slash_command.py /chore "Add logging to agent.py"
 
-    # Run with specific model
-    ./adws/adw_slash_command.py /implement plan.md --model opus
+    # Run with a specific model profile
+    ./adws/adw_slash_command.py /implement plan.md --profile claude-opus
 
     # Run from a different working directory
     ./adws/adw_slash_command.py /test --working-dir /path/to/project
@@ -53,6 +53,7 @@ from agent import (
     execute_template,
     generate_short_id,
 )
+from models import DEFAULT_PROFILE, PROFILE_NAMES, get_profile
 
 # Output file name constants
 OUTPUT_JSONL = "cc_raw_output.jsonl"
@@ -65,10 +66,12 @@ SUMMARY_JSON = "custom_summary_output.json"
 @click.argument("slash_command", required=True)
 @click.argument("args", nargs=-1)  # Accept multiple optional arguments
 @click.option(
-    "--model",
-    type=click.Choice(["sonnet", "opus"]),
-    default="sonnet",
-    help="Claude model to use",
+    "--profile",
+    type=click.Choice(PROFILE_NAMES),
+    envvar="ADW_PROFILE",
+    default=DEFAULT_PROFILE,
+    show_default=True,
+    help="Model profile to use (default can be set with ADW_PROFILE)",
 )
 @click.option(
     "--working-dir",
@@ -83,12 +86,13 @@ SUMMARY_JSON = "custom_summary_output.json"
 def main(
     slash_command: str,
     args: tuple,
-    model: str,
+    profile: str,
     working_dir: str,
     agent_name: str,
 ):
     """Run Claude Code slash commands from the command line."""
     console = Console()
+    model = get_profile(profile).model
 
     # Generate a unique ID for this execution
     adw_id = generate_short_id()
@@ -103,7 +107,7 @@ def main(
         slash_command=slash_command,
         args=list(args),  # Convert tuple to list
         adw_id=adw_id,
-        model=model,
+        profile=profile,
         working_dir=working_dir,
     )
 
@@ -116,6 +120,7 @@ def main(
     info_table.add_row("ADW Name", "adw_slash_command")
     info_table.add_row("Command", slash_command)
     info_table.add_row("Args", " ".join(args) if args else "(none)")
+    info_table.add_row("Profile", profile)
     info_table.add_row("Model", model)
     info_table.add_row("Working Dir", working_dir)
 
@@ -183,6 +188,7 @@ def main(
                     "slash_command": slash_command,
                     "args": list(args),
                     "path_to_slash_command_prompt": path_to_slash_command_prompt,
+                    "profile": profile,
                     "model": model,
                     "working_dir": working_dir,
                     "success": response.success,

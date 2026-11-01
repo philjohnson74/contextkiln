@@ -8,10 +8,12 @@ import re
 import logging
 import time
 import uuid
-from typing import Optional, List, Dict, Any, Tuple, Final, Literal
+from typing import Optional, List, Dict, Any, Tuple, Final
 from enum import Enum
 from pydantic import BaseModel
 from dotenv import load_dotenv
+
+from models import DEFAULT_PROFILE, get_profile
 
 
 # Retry codes for Claude Code execution errors
@@ -31,7 +33,7 @@ class AgentPromptRequest(BaseModel):
     prompt: str
     adw_id: str
     agent_name: str = "ops"
-    model: Literal["sonnet", "opus"] = "sonnet"
+    profile: str = DEFAULT_PROFILE
     dangerously_skip_permissions: bool = False
     output_file: str
     working_dir: Optional[str] = None
@@ -51,7 +53,7 @@ class AgentTemplateRequest(BaseModel):
     slash_command: str
     args: List[str]
     adw_id: str
-    model: Literal["sonnet", "opus"] = "sonnet"
+    profile: str = DEFAULT_PROFILE
     working_dir: Optional[str] = None
 
 
@@ -68,11 +70,16 @@ class ClaudeCodeResultMessage(BaseModel):
     total_cost_usd: float
 
 
-def get_safe_subprocess_env() -> Dict[str, str]:
+def get_safe_subprocess_env(profile: str = DEFAULT_PROFILE) -> Dict[str, str]:
     """Get filtered environment variables safe for subprocess execution.
-    
+
     Returns only the environment variables needed based on .env.sample configuration.
-    
+    Routing variables such as ANTHROPIC_BASE_URL come only from the profile, never
+    from the shell, so a stray export can't send a run to the wrong model.
+
+    Args:
+        profile: Name of the model profile whose env is merged in
+
     Returns:
         Dictionary containing only required environment variables
     """
@@ -104,7 +111,11 @@ def get_safe_subprocess_env() -> Dict[str, str]:
     }
     
     # Filter out None values
-    return {k: v for k, v in safe_env_vars.items() if v is not None}
+    env = {k: v for k, v in safe_env_vars.items() if v is not None}
+
+    # Profile values win, e.g. the local profile blanks ANTHROPIC_API_KEY
+    env.update(get_profile(profile).env)
+    return env
 
 
 # Load environment variables
@@ -285,7 +296,7 @@ def save_last_entry_as_raw_result(json_file: str) -> Optional[str]:
         return None
 
 
-def get_claude_env() -> Dict[str, str]:
+def get_claude_env(profile: str = DEFAULT_PROFILE) -> Dict[str, str]:
     """Get only the required environment variables for Claude Code execution.
 
     This is a wrapper around get_safe_subprocess_env() for
@@ -295,7 +306,7 @@ def get_claude_env() -> Dict[str, str]:
     based on .env.sample configuration.
     """
     # Use the function defined above
-    return get_safe_subprocess_env()
+    return get_safe_subprocess_env(profile)
 
 
 def save_prompt(prompt: str, adw_id: str, agent_name: str = "ops") -> None:
@@ -400,7 +411,7 @@ def prompt_claude_code(request: AgentPromptRequest) -> AgentPromptResponse:
 
     # Build command - always use stream-json format and verbose
     cmd = [CLAUDE_PATH, "-p", request.prompt]
-    cmd.extend(["--model", request.model])
+    cmd.extend(["--model", get_profile(request.profile).model])
     cmd.extend(["--output-format", "stream-json"])
     cmd.append("--verbose")
 
@@ -415,7 +426,7 @@ def prompt_claude_code(request: AgentPromptRequest) -> AgentPromptResponse:
         cmd.append("--dangerously-skip-permissions")
 
     # Set up environment with only required variables
-    env = get_claude_env()
+    env = get_claude_env(request.profile)
 
     try:
         # Open output file for streaming
@@ -596,7 +607,7 @@ def execute_template(request: AgentTemplateRequest) -> AgentPromptResponse:
             slash_command="/implement",
             args=["plan.md"],
             adw_id="abc12345",
-            model="sonnet"  # Explicitly set model
+            profile="claude"  # Explicitly set model profile
         )
         response = execute_template(request)
     """
@@ -622,7 +633,7 @@ def execute_template(request: AgentTemplateRequest) -> AgentPromptResponse:
         prompt=prompt,
         adw_id=request.adw_id,
         agent_name=request.agent_name,
-        model=request.model,
+        profile=request.profile,
         dangerously_skip_permissions=True,
         output_file=output_file,
         working_dir=request.working_dir,  # Pass through working_dir

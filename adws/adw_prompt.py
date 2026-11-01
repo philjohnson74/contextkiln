@@ -22,8 +22,8 @@ Usage:
     python adw_prompt.py "Write a hello world Python script"
 
 Examples:
-    # Run with specific model
-    ./adw_prompt.py "Explain this code" --model opus
+    # Run with a specific model profile
+    ./adw_prompt.py "Explain this code" --profile claude-opus
 
     # Run with custom output file
     ./adw_prompt.py "Create a FastAPI app" --output my_result.jsonl
@@ -59,6 +59,7 @@ from agent import (
     prompt_claude_code_with_retry,
     generate_short_id,
 )
+from models import DEFAULT_PROFILE, PROFILE_NAMES, get_profile
 
 # Output file name constants
 OUTPUT_JSONL = "cc_raw_output.jsonl"
@@ -70,10 +71,12 @@ SUMMARY_JSON = "custom_summary_output.json"
 @click.command()
 @click.argument("prompt", required=True)
 @click.option(
-    "--model",
-    type=click.Choice(["sonnet", "opus"]),
-    default="sonnet",
-    help="Claude model to use",
+    "--profile",
+    type=click.Choice(PROFILE_NAMES),
+    envvar="ADW_PROFILE",
+    default=DEFAULT_PROFILE,
+    show_default=True,
+    help="Model profile to use (default can be set with ADW_PROFILE)",
 )
 @click.option(
     "--output",
@@ -91,7 +94,7 @@ SUMMARY_JSON = "custom_summary_output.json"
 )
 def main(
     prompt: str,
-    model: str,
+    profile: str,
     output: str,
     working_dir: str,
     no_retry: bool,
@@ -99,6 +102,7 @@ def main(
 ):
     """Run an adhoc Claude Code prompt from the command line."""
     console = Console()
+    model = get_profile(profile).model
 
     # Generate a unique ID for this execution
     adw_id = generate_short_id()
@@ -119,7 +123,7 @@ def main(
         prompt=prompt,
         adw_id=adw_id,
         agent_name=agent_name,
-        model=model,
+        profile=profile,
         dangerously_skip_permissions=True,
         output_file=output,
         working_dir=working_dir,
@@ -133,6 +137,7 @@ def main(
     info_table.add_row("ADW ID", adw_id)
     info_table.add_row("ADW Name", "adw_prompt")
     info_table.add_row("Prompt", prompt)
+    info_table.add_row("Profile", profile)
     info_table.add_row("Model", model)
     info_table.add_row("Working Dir", working_dir)
     info_table.add_row("Output", output)
@@ -205,6 +210,7 @@ def main(
                 {
                     "adw_id": adw_id,
                     "prompt": prompt,
+                    "profile": profile,
                     "model": model,
                     "working_dir": working_dir,
                     "success": response.success,
