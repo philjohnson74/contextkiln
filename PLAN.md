@@ -9,6 +9,19 @@ You also want to learn about open models along the way, so Phase 1 is an experim
 
 ---
 
+## Current status and decisions (updated 2026-11-01)
+
+**Phase 2 is complete. Phase 3 is next.** These decisions override anything later in this plan that assumes otherwise, including mentions of a public repo in Phases 5–7 and the risks section.
+
+| Decision | Detail | What it means |
+|---|---|---|
+| **The repo is private** | [`philjohnson74/contextkiln`](https://github.com/philjohnson74/contextkiln). The copied TAC-8 code has no visible licence, and its origin may be private course material. | **Check the TAC-8 terms, or replace the copied code, before going public.** Keep following the public-repo hygiene rules so the repo stays ready for it. |
+| **Licence is FSL-1.1-MIT** | Each version becomes available under MIT two years after release. The copyright holder is currently `philjohnson74`. | The licence only covers code we own, so it doesn't settle the TAC-8 question. |
+| **`main` has no branch protection** | The current GitHub plan doesn't offer it for private repos. | GitHub won't block a push to `main` or a merge that skips checks, so ADW code has to enforce both. See Phases 3 and 5. |
+| **Claude Code can't run `gh` or `git push` in this repo** | They're in the `deny` list in `.claude/settings.json`. This applies to interactive sessions as well as agents. | ADW Python code runs them directly, which the deny rules don't affect. Otherwise you run them yourself. |
+
+---
+
 ## Starting point (checked on 2026-10-17)
 
 | Item | State | Implication |
@@ -91,6 +104,8 @@ Pick 2–3 that support **tool calling** (required for agentic use). Check the O
 
 ## Phase 2: Scaffold the ContextKiln repo (~1 session)
 
+**Done on 2026-11-01, with changes.** The repo was created as private rather than public, FSL-1.1-MIT was chosen, and step 7 wasn't possible on the current GitHub plan. The steps below are the original plan. The tree shows the intended end state: `models.py`, `git_ops.py`, `github.py` and the remaining commands arrive in Phases 3 and 5, and the apps in Phase 4.
+
 ```
 contextkiln/
 ├── README.md                 # what ContextKiln is + how the agentic layer works
@@ -161,7 +176,10 @@ This is the bridge between the TAC-8 layer and the open-model experiments.
 
 ### Git + GitHub lifecycle for every ADW
 
-Every ADW runs through the same deterministic wrapper in Python code, not in prompts, so even a weak local model can't get it wrong:
+Every ADW runs through the same deterministic wrapper in Python code, not in prompts, so even a weak local model can't get it wrong.
+
+**`git_ops.py` must refuse to commit or push when the current branch is `main`, and abort the ADW if it is.** With no branch protection, this check is what keeps ADWs off `main`.
+
 
 1. **Sync:** check the working tree is clean (abort if not), then `git fetch origin && git checkout main && git pull --ff-only`.
 2. **Branch:** `git checkout -b adw/{type}-{adw_id}-{slug}`, e.g. `adw/chore-a1b2c3d4-health-endpoint`.
@@ -241,7 +259,7 @@ adw_ship.py waits for checks          ◀──
    - GitHub doesn't let a PR author approve their own PR, and the ADW opens PRs as you;
    - a status check is easy to require in branch protection;
    - the ADW can read it with `gh pr checks`.
-5. **Update branch protection on `main`:**
+5. **Update branch protection on `main`** (**not available while the repo is private on the current plan**; `adw_ship.py` has to enforce these rules instead, see 5b step 6):
    - require the `ci` and `claude-review` checks, and require the branch to be up to date;
    - no required human approvals;
    - turn on **"Allow auto-merge"** in the repo settings.
@@ -276,7 +294,9 @@ The control flow is deterministic Python. Agents are only called for the fixes. 
    - commit `fix: address review round N` and push (this triggers a re-review);
    - reply to each addressed comment with the commit SHA, then go back to step 1.
 5. **Round limit** (default 3): if the PR still isn't approved, add a `needs-human` label, post a summary of what's unresolved, send a macOS notification, and stop. This mirrors ContextKiln's own escalation-to-a-human idea.
-6. **Merge:** `gh pr merge <N> --squash --delete-branch`. Alternatively, enable GitHub-native auto-merge (`--auto`) so GitHub merges as soon as the required checks pass. Then return to `main`, pull, and log `{rounds, build_profile, outcome}` to `runs.jsonl`.
+6. **Merge:** `gh pr merge <N> --squash --delete-branch`. Then return to `main`, pull, and log `{rounds, build_profile, outcome}` to `runs.jsonl`.
+   - **Without branch protection, GitHub won't stop a bad merge.** Immediately before merging, `adw_ship.py` must re-check that `ci` and `claude-review` passed on the PR's current head commit and that the branch is up to date with `main`. If any of these fail, it must not merge.
+   - GitHub-native auto-merge (`--auto`) depends on required checks, so don't use it unless branch protection becomes available.
 
 ### 5c. Composed workflow and a trust ramp
 
@@ -330,7 +350,7 @@ Bring these in from the TAC-8 scaled layout only when the pain is real:
 - **Public repo hygiene:**
   - Secrets live only in `.env`. Consider enabling GitHub secret scanning and push protection (free for public repos).
   - Run logs in `agents/` can contain prompts and file contents, so they stay gitignored. Only the summary line goes into PR bodies.
-  - Agents should never push to `main`; branch protection enforces this.
+  - Agents should never push to `main`. While there's no branch protection, the `git push` deny rule and the `git_ops.py` check enforce this.
 - **Review loop failure modes:**
   - *Ping-pong*: the fixer and reviewer disagree forever. The round limit and the `needs-human` escalation handle this.
   - *Reviewer drift*: the reviewer gets stricter or looser over time. Its prompt is versioned, so tune it through PRs.
