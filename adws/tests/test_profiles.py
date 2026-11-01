@@ -51,6 +51,16 @@ def test_unknown_profile_is_rejected():
         get_profile("nope")
 
 
+def test_tests_cannot_start_a_real_agent(tmp_path):
+    response = agent.prompt_claude_code(
+        agent.AgentPromptRequest(
+            prompt="hello", adw_id="abc12345", output_file=str(tmp_path / "out.jsonl")
+        )
+    )
+    assert response.success is False
+    assert "not installed" in response.output
+
+
 def test_every_listed_profile_resolves():
     for name in PROFILE_NAMES:
         assert get_profile(name).name == name

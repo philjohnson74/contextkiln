@@ -1,4 +1,4 @@
-"""Shared test setup. Keeps tests from writing to the real run log."""
+"""Shared test setup. Keeps tests away from real agents and the real run log."""
 
 import os
 import sys
@@ -10,6 +10,12 @@ sys.path.insert(
 )
 
 import agent
+
+
+@pytest.fixture(autouse=True)
+def no_real_agents(monkeypatch):
+    """Point at a missing CLI, so a test that forgets to fake an agent can't start one."""
+    monkeypatch.setattr(agent, "CLAUDE_PATH", "/nonexistent/claude-blocked-in-tests")
 
 
 @pytest.fixture(autouse=True)
