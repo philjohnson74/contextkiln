@@ -16,6 +16,10 @@ Before starting any workflow, run `adw_health_check.py` to ensure all tools and 
 
 `adw_modules/git_ops.py` and `adw_modules/github.py` run git and `gh` from Python, so agents don't have to. `git_ops.py` refuses to commit or push on `main`, and checks before each one that an agent hasn't switched branches. `.claude/commands/commit.md` and `pull_request.md` only write the text.
 
+## Requirements
+
+The `local` profile needs Ollama running at `LOCAL_BASE_URL` (default `http://localhost:11434`), with the model pulled. See [local_models.md](../ai_docs/local_models.md) for how to start it. The `claude` and `claude-opus` profiles don't need it.
+
 ## Lifecycle
 
 The chore and feature ADWs share `adw_modules/lifecycle.py`, which runs these steps in Python:
