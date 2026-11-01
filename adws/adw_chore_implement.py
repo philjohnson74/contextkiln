@@ -26,6 +26,9 @@ Examples:
     # Run with a specific model profile
     ./adws/adw_chore_implement.py "Add logging to agent.py" --profile claude-opus
 
+    # Plan with Claude and build with a local model
+    ./adws/adw_chore_implement.py "Add logging to agent.py" --plan-profile claude --build-profile local
+
     # Run from a different working directory
     ./adws/adw_chore_implement.py "Update documentation" --working-dir /path/to/project
 
@@ -98,6 +101,16 @@ def extract_plan_path(output: str) -> str:
     help="Model profile to use (default can be set with ADW_PROFILE)",
 )
 @click.option(
+    "--plan-profile",
+    type=click.Choice(PROFILE_NAMES),
+    help="Model profile for planning (default: --profile)",
+)
+@click.option(
+    "--build-profile",
+    type=click.Choice(PROFILE_NAMES),
+    help="Model profile for building (default: --profile)",
+)
+@click.option(
     "--working-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
     help="Working directory for command execution (default: current directory)",
@@ -105,11 +118,16 @@ def extract_plan_path(output: str) -> str:
 def main(
     prompt: str,
     profile: str,
+    plan_profile: str,
+    build_profile: str,
     working_dir: str,
 ):
     """Run chore planning and implementation workflow."""
     console = Console()
-    model = get_profile(profile).model
+    plan_profile = plan_profile or profile
+    build_profile = build_profile or profile
+    plan_model = get_profile(plan_profile).model
+    build_model = get_profile(build_profile).model
 
     # Generate a unique ID for this workflow
     adw_id = generate_short_id()
@@ -126,8 +144,8 @@ def main(
         Panel(
             f"[bold blue]ADW Chore & Implement Workflow[/bold blue]\n\n"
             f"[cyan]ADW ID:[/cyan] {adw_id}\n"
-            f"[cyan]Profile:[/cyan] {profile}\n"
-            f"[cyan]Model:[/cyan] {model}\n"
+            f"[cyan]Plan:[/cyan] {plan_profile} ({plan_model})\n"
+            f"[cyan]Build:[/cyan] {build_profile} ({build_model})\n"
             f"[cyan]Working Dir:[/cyan] {working_dir}",
             title="[bold blue]🚀 Workflow Configuration[/bold blue]",
             border_style="blue",
@@ -145,7 +163,7 @@ def main(
         slash_command="/chore",
         args=[adw_id, prompt],
         adw_id=adw_id,
-        profile=profile,
+        profile=plan_profile,
         working_dir=working_dir,
     )
 
@@ -158,7 +176,8 @@ def main(
     chore_info_table.add_row("ADW Name", "adw_chore_implement (planning)")
     chore_info_table.add_row("Command", "/chore")
     chore_info_table.add_row("Args", f'{adw_id} "{prompt}"')
-    chore_info_table.add_row("Model", model)
+    chore_info_table.add_row("Profile", plan_profile)
+    chore_info_table.add_row("Model", plan_model)
     chore_info_table.add_row("Agent", planner_name)
 
     console.print(
@@ -231,8 +250,8 @@ def main(
                     "slash_command": "/chore",
                     "args": [adw_id, prompt],
                     "path_to_slash_command_prompt": ".claude/commands/chore.md",
-                    "profile": profile,
-                    "model": model,
+                    "profile": plan_profile,
+                    "model": plan_model,
                     "working_dir": working_dir,
                     "success": chore_response.success,
                     "session_id": chore_response.session_id,
@@ -296,7 +315,7 @@ def main(
             slash_command="/implement",
             args=[plan_path],
             adw_id=adw_id,
-            profile=profile,
+            profile=build_profile,
             working_dir=working_dir,
         )
 
@@ -309,7 +328,8 @@ def main(
         implement_info_table.add_row("ADW Name", "adw_chore_implement (building)")
         implement_info_table.add_row("Command", "/implement")
         implement_info_table.add_row("Args", plan_path)
-        implement_info_table.add_row("Model", model)
+        implement_info_table.add_row("Profile", build_profile)
+        implement_info_table.add_row("Model", build_model)
         implement_info_table.add_row("Agent", builder_name)
 
         console.print(
@@ -364,8 +384,8 @@ def main(
                     "slash_command": "/implement",
                     "args": [plan_path],
                     "path_to_slash_command_prompt": ".claude/commands/implement.md",
-                    "profile": profile,
-                    "model": model,
+                    "profile": build_profile,
+                    "model": build_model,
                     "working_dir": working_dir,
                     "success": implement_response.success,
                     "session_id": implement_response.session_id,
@@ -452,8 +472,10 @@ def main(
                     "workflow": "chore_implement",
                     "adw_id": adw_id,
                     "prompt": prompt,
-                    "profile": profile,
-                    "model": model,
+                    "plan_profile": plan_profile,
+                    "plan_model": plan_model,
+                    "build_profile": build_profile,
+                    "build_model": build_model,
                     "working_dir": working_dir,
                     "plan_path": plan_path,
                     "phases": {

@@ -39,6 +39,8 @@ Every script takes `--profile`, which picks the model and the environment that r
 | `claude-opus` | `opus` | Anthropic |
 | `local` | `LOCAL_MODEL`, default `qwen3-coder:30b` | Ollama at `LOCAL_BASE_URL`, default `http://localhost:11434` |
 
+`adw_chore_implement.py` and `adw_feature_implement.py` can use a different profile for each step, for example `--plan-profile claude --build-profile local`. A step without its own option uses `--profile`.
+
 `LOCAL_CONTEXT_LENGTH` (default `65536`) must match `OLLAMA_CONTEXT_LENGTH` on the server. See [local_models.md](../ai_docs/local_models.md) for why.
 
 `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` set in your shell are ignored, so only the profile decides where a run goes.
@@ -46,7 +48,7 @@ Every script takes `--profile`, which picks the model and the environment that r
 ## Tests
 
 ```bash
-uv run --with pytest --with pydantic --with python-dotenv pytest adws/tests
+./scripts/test.sh
 ```
 
 Phase 3 of `PLAN.md` still has to add `git_ops.py` and `github.py`.
