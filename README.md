@@ -4,7 +4,7 @@ An AI tech consultancy app, built through agentic developer workflows.
 
 ContextKiln has two layers:
 
-- **Application layer** (`apps/`): an LLM chat for software engineering and infrastructure questions, with a "talk to a human" escalation path. This arrives in Phase 4 of [PLAN.md](PLAN.md).
+- **Application layer** (`apps/`): an LLM chat for software engineering and infrastructure questions, with a "talk to a human" escalation path. See [app_docs/app-shell.md](app_docs/app-shell.md).
 - **Agentic layer** (`specs/`, `.claude/commands/`, `adws/`): the prompts and workflows that build the application. Each workflow is designed to run on Claude or on a local open model, so the two can be compared on real work.
 
 ## How the agentic layer works
@@ -35,7 +35,7 @@ See [adws/README.md](adws/README.md) for the scripts and [CLAUDE.md](CLAUDE.md) 
 
 ## Setup
 
-You need [uv](https://docs.astral.sh/uv/), the [Claude Code CLI](https://code.claude.com/docs) and the [GitHub CLI](https://cli.github.com/). Local model runs also need [Ollama](https://ollama.com/).
+You need [uv](https://docs.astral.sh/uv/), [Node.js](https://nodejs.org/), the [Claude Code CLI](https://code.claude.com/docs) and the [GitHub CLI](https://cli.github.com/). Local model runs and the app's default chat model also need [Ollama](https://ollama.com/).
 
 ```bash
 cp .env.sample .env
@@ -45,7 +45,7 @@ Then add your `ANTHROPIC_API_KEY` to `.env`.
 
 ## Status
 
-See [PLAN.md](PLAN.md) for the roadmap. Model profiles and the Git/PR lifecycle come next, in Phase 3.
+See [PLAN.md](PLAN.md) for the roadmap. Automated PR review and the ship loop come next, in Phase 5.
 
 ## Licence
 

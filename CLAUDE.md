@@ -8,7 +8,7 @@ An AI tech consultancy app: an LLM chat for software engineering help, with a pa
 - **Frontend:** Vite, React and TypeScript in `apps/frontend/`, managed with npm.
 - **Agentic layer:** `adws/` (single-file uv scripts) and `.claude/commands/` (prompts).
 
-The application shell arrives in Phase 4 of `PLAN.md`. Until then `apps/` is empty, `scripts/test.sh` only runs the ADW tests in `adws/tests/`, and the start and stop scripts don't exist.
+See `app_docs/app-shell.md` for the application shell's settings, API and code layout.
 
 ## Commands
 
