@@ -1,6 +1,6 @@
 {
   "permissions": {
     "allow": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(uv:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(./scripts/*)", "Bash(ls:*)", "Bash(mkdir:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git ls-files:*)"],
-    "deny": ["Read(./.env)", "Read(./.env.*)", "Bash(rm -rf:*)", "Bash(sudo:*)", "Bash(git push:*)", "Bash(git reset --hard:*)", "Bash(gh:*)"]
+    "deny": ["Read(./.env)", "Read(./.env.*)", "Bash(rm -rf:*)", "Bash(sudo:*)", "Bash(git push:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git reset --hard:*)", "Bash(gh:*)"]
   }
 }
