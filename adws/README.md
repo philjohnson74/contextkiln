@@ -12,6 +12,8 @@ Executable scripts that combine deterministic Python with Claude Code agents. Ea
 
 `adw_modules/agent.py` builds the `claude` subprocess call, filters its environment, handles retries and parses the stream-json output.
 
+`adw_modules/git_ops.py` and `adw_modules/github.py` run git and `gh` from Python, so agents don't have to. `git_ops.py` refuses to commit or push on `main`, and checks before each one that an agent hasn't switched branches. `.claude/commands/commit.md` and `pull_request.md` only write the text. Phase 3 of `PLAN.md` still has to connect these to the composed ADWs.
+
 ## Output
 
 Each run writes to `agents/{adw_id}/{agent_name}/` (gitignored):
@@ -50,5 +52,3 @@ Every script takes `--profile`, which picks the model and the environment that r
 ```bash
 ./scripts/test.sh
 ```
-
-Phase 3 of `PLAN.md` still has to add `git_ops.py` and `github.py`.
