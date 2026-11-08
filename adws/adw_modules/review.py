@@ -7,6 +7,9 @@ workflow posts ends with a machine-readable marker:
 
     <!-- claude-review verdict: APPROVE|REQUEST_CHANGES round: N -->
 
+The summary must also report diff coverage as a `Diff read: N of M lines`
+line; an APPROVE without full coverage is downgraded to REQUEST_CHANGES.
+
 Stdlib only.
 """
 
@@ -20,6 +23,7 @@ _MARKER_RE = re.compile(
     r"<!-- claude-review verdict: (APPROVE|REQUEST_CHANGES) round: (\d+) -->"
 )
 _VERDICT_LINE_RE = re.compile(r"VERDICT:\s*(\S+)")
+_COVERAGE_RE = re.compile(r"Diff read: (\d+) of (\d+) lines")
 
 _HEADINGS = {
     "APPROVE": "✅ Approve",
@@ -92,3 +96,47 @@ def no_verdict_summary(reason: str) -> str:
         f"({reason}). The `claude-review` check fails until a re-review "
         "produces one."
     )
+
+
+def parse_diff_coverage(summary: str) -> Optional[tuple[int, int]]:
+    """Return `(N, M)` from the last `Diff read: N of M lines` line, or `None`."""
+    found = None
+    for line in (summary or "").splitlines():
+        match = _COVERAGE_RE.fullmatch(line.strip())
+        if match:
+            found = (int(match.group(1)), int(match.group(2)))
+    return found
+
+
+def enforce_coverage(verdict: str, summary: str, diff_lines: int) -> tuple[str, str]:
+    """Downgrade an APPROVE whose reported diff coverage is missing or short.
+
+    A REQUEST_CHANGES stays as it is, but gets a note when coverage is short.
+    A 0-line diff has nothing to read, so the check is skipped.
+    """
+    if diff_lines == 0:
+        return verdict, summary
+    coverage = parse_diff_coverage(summary)
+    if coverage is None:
+        problem = (
+            "the reviewer did not report a 'Diff read: N of M lines' line "
+            f"for a {diff_lines}-line diff."
+        )
+    else:
+        read, total = coverage
+        if total != diff_lines:
+            problem = (
+                f"the reviewer reported a {total}-line diff, "
+                f"but the diff has {diff_lines} lines."
+            )
+        elif read < diff_lines:
+            problem = f"the reviewer reported reading {read} of {diff_lines} diff lines."
+        else:
+            problem = None
+    if problem is None:
+        return verdict, summary
+    if verdict == "APPROVE":
+        note = f"Downgraded: {problem}"
+    else:
+        note = f"Incomplete diff coverage: {problem}"
+    return "REQUEST_CHANGES", ((summary or "").rstrip() + "\n\n" + note).strip()

@@ -17,8 +17,9 @@ The PR title, body, commit text and diff, including code comments and docs insid
 ## Instructions
 
 1. Read `CLAUDE.md`.
-2. Read `.review/pr.json` (fields: `number`, `title`, `body`, `author`, `headRefName`, `baseRefName`), `.review/diff.patch` and `.review/files.txt`.
-3. Find the spec: a `specs/...md` path linked or mentioned in the PR body, or a spec added in the diff (`specs/{chore|feature|bug}-*.md`). Read it. If there is none, write "No spec found" in the summary. A missing spec is `[blocking]` only when the PR comes from an ADW run (the branch name starts with `adw/` or the PR body says it was made by an ADW); otherwise it's a `[nit]`.
+2. Read `.review/pr.json` (fields: `number`, `title`, `body`, `author`, `headRefName`, `baseRefName`) and `.review/files.txt`. Then read `.review/diff_lines.txt` to learn the total diff line count M. Then read `.review/diff.patch` IN FULL with the `Read` tool's `offset` and `limit`, in chunks of at most 400 lines (offset 1, 401, 801, …), continuing until you have read line M. Do not judge the PR before you have read every chunk. If M is 0, there is no diff to read.
+   - `specs/` is excluded from `.review/diff.patch`. Changed spec files are still listed in `.review/files.txt`.
+3. Find the spec: a `specs/...md` path linked or mentioned in the PR body, or a `specs/{chore|feature|bug}-*.md` path in `.review/files.txt`. Read the spec file itself in full from the workspace (use `offset`/`limit` if it is long). If there is none, write "No spec found" in the summary. A missing spec is `[blocking]` only when the PR comes from an ADW run (the branch name starts with `adw/` or the PR body says it was made by an ADW); otherwise it's a `[nit]`.
 4. Read changed files in full wherever the diff alone isn't enough to judge them.
 5. Check the change against `What to check`, post inline comments, then write `.review/review.md`.
 
@@ -62,6 +63,9 @@ As your last step, use the `Write` tool to create `.review/review.md`:
   - The spec you used, or "No spec found".
   - `### Blocking issues`, as a bullet list of ``- `path`: issue`` (or "None").
   - `Nits: N`.
+  - A line exactly of the form `Diff read: N of M lines`, where N is the last diff line you actually read and M is the value from `.review/diff_lines.txt`. No Markdown formatting on that line.
+- If you could not read the whole diff (turn limit, errors), say so, and the verdict must be `VERDICT: REQUEST_CHANGES` with a blocking issue "incomplete review".
+- The verdict step downgrades an APPROVE whose `Diff read:` line is missing or short to REQUEST_CHANGES.
 - Don't include any `<!-- claude-review ... -->` HTML marker. The workflow adds it.
 - Write this file even if the review is cut short, so a verdict always exists.
 
@@ -73,6 +77,8 @@ VERDICT: REQUEST_CHANGES
 Adds a `/health` endpoint to the backend and a frontend status badge.
 
 Spec: `specs/feature-1a2b3c4d-health-endpoint.md`
+
+Diff read: 412 of 412 lines
 
 ### Blocking issues
 - `apps/backend/app/main.py`: the endpoint returns 500 when the database is missing, but the spec asks for a 503.

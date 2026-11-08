@@ -17,10 +17,10 @@ A GitHub Actions workflow in `.github/workflows/claude-review.yml` has Claude re
 
 ## How it works
 
-1. **Prepare review context:** writes `.review/pr.json` (from `gh pr view`), `.review/diff.patch`, `.review/files.txt` and `.review/comments.json` (the PR's existing comments). `.review/` is gitignored.
+1. **Prepare review context:** writes `.review/pr.json` (from `gh pr view`), `.review/diff.patch` (the diff, excluding `specs/`), `.review/files.txt` (all changed files, including specs), `.review/diff_lines.txt` (the diff's line count) and `.review/comments.json` (the PR's existing comments). `.review/` is gitignored.
 2. **Load review prompt:** reads `.claude/commands/review_pr.md`.
-3. **Run Claude review:** `anthropics/claude-code-action@v1` with tools `Read`, `Glob`, `Grep`, `Write` and `mcp__github_inline_comment__create_inline_comment`. Claude posts inline comments tagged `[blocking]` or `[nit]` (as `github-actions[bot]`, using the job's `github.token`) and writes `.review/review.md`. The step has `continue-on-error: true`, so a crash or timeout still reaches the next step.
-4. **Post verdict:** `adws/review_verdict.py post` parses the verdict, posts the summary comment (as `github-actions[bot]`) and exits 0 on APPROVE, 1 otherwise.
+3. **Run Claude review:** `anthropics/claude-code-action@v1` with tools `Read`, `Glob`, `Grep`, `Write` and `mcp__github_inline_comment__create_inline_comment`. Claude reads the whole diff in chunks of at most 400 lines and reads the spec in full from the workspace. It posts inline comments tagged `[blocking]` or `[nit]` (as `github-actions[bot]`, using the job's `github.token`) and writes `.review/review.md`. The step has `continue-on-error: true`, so a crash or timeout still reaches the next step.
+4. **Post verdict:** `adws/review_verdict.py post --diff-lines N` parses the verdict, applies the diff coverage rule, posts the summary comment (as `github-actions[bot]`) and exits 0 on APPROVE, 1 otherwise.
 
 ## Verdict file and marker
 
@@ -38,6 +38,16 @@ The summary comment's last line is a marker:
 
 The parsing and marker logic live in `adws/adw_modules/review.py`.
 
+## Diff coverage
+
+A reviewer must never approve code it hasn't read. The summary must contain a line exactly of the form `Diff read: N of M lines`.
+
+- An APPROVE is downgraded to REQUEST_CHANGES, with a note starting `Downgraded:`, if that line is missing, N is less than the diff's line count, or M differs from it.
+- A REQUEST_CHANGES with short coverage gets a note but stays REQUEST_CHANGES.
+- A 0-line diff (e.g. a specs-only PR) skips the check.
+
+The logic lives in `adws/adw_modules/review.py` (`parse_diff_coverage`, `enforce_coverage`). It trusts what the reviewer reports, so it catches a reviewer that stops early, not one that lies.
+
 ## Why the reviewer doesn't use gh
 
 The action runs Claude Code inside this repo, so `.claude/settings.json` applies, and it denies `Bash(gh:*)` and git writes. The workflow prepares the context instead, and deterministic Python posts the verdict.
@@ -49,7 +59,7 @@ The action runs Claude Code inside this repo, so `.claude/settings.json` applies
 
 ## Cost
 
-Sonnet, `--max-turns 30`, a 20-minute timeout, drafts skipped, and a newer push cancels the older run. Each push to a ready PR is one paid review.
+Sonnet, `--max-turns 40`, a 20-minute timeout, drafts skipped, and a newer push cancels the older run. Each push to a ready PR is one paid review.
 
 ## Changing the reviewer
 
