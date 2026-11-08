@@ -6,6 +6,8 @@
 # Agent output and worktrees (may contain prompts and file contents)
 agents/
 trees/
+# Claude PR review workspace (CI)
+.review/
 
 # Python
 __pycache__/
