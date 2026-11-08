@@ -196,10 +196,12 @@ def _run_agent(
         )
 
 
-def _write_summary(adw_id: str, summary: Dict[str, Any]) -> str:
+def _write_summary(
+    adw_id: str, summary: Dict[str, Any], filename: str = "workflow_summary.json"
+) -> str:
     output_dir = os.path.join(os.path.dirname(agent.RUNS_LOG), adw_id)
     os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, "workflow_summary.json")
+    path = os.path.join(output_dir, filename)
     with open(path, "w") as f:
         json.dump(summary, f, indent=2)
     return path
