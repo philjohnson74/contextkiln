@@ -9,6 +9,7 @@ An AI tech consultancy app: an LLM chat for software engineering help, with a pa
 - **Agentic layer:** `adws/` (single-file uv scripts) and `.claude/commands/` (prompts).
 
 See `app_docs/app-shell.md` for the application shell's settings, API and code layout.
+See `app_docs/ci.md` for the CI workflow and how to reproduce it locally.
 
 ## Commands
 
