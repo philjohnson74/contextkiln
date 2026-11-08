@@ -198,3 +198,111 @@ def test_slugify(text, expected):
 def test_branch_name():
     name = git_ops.branch_name("chore", "a1b2c3d4", "Health endpoint")
     assert name == "adw/chore-a1b2c3d4-health-endpoint"
+
+
+def clone(remote, tmp_path, name="other"):
+    path = tmp_path / name
+    git(tmp_path, "clone", "-q", str(remote), str(path))
+    git(path, "config", "user.name", "Test")
+    git(path, "config", "user.email", "test@example.com")
+    return path
+
+
+def test_head_sha(repo):
+    assert git_ops.head_sha(cwd=repo) == git(repo, "rev-parse", "HEAD")
+
+
+def test_checkout_pr_branch_refuses_main(repo):
+    with pytest.raises(GitError, match="Refusing"):
+        git_ops.checkout_pr_branch("main", cwd=repo)
+    with pytest.raises(GitError, match="Refusing"):
+        git_ops.checkout_pr_branch("", cwd=repo)
+
+
+def test_checkout_pr_branch_refuses_a_dirty_tree(repo):
+    (repo / "README.md").write_text("changed\n")
+    with pytest.raises(GitError, match="clean"):
+        git_ops.checkout_pr_branch(BRANCH, cwd=repo)
+
+
+def test_checkout_pr_branch_creates_it_from_the_remote(repo, remote, tmp_path):
+    other = clone(remote, tmp_path)
+    git(other, "checkout", "-q", "-b", BRANCH)
+    git(other, "commit", "-q", "--allow-empty", "-m", "pr work")
+    git(other, "push", "-q", "origin", BRANCH)
+
+    git_ops.checkout_pr_branch(BRANCH, cwd=repo)
+
+    assert git_ops.current_branch(cwd=repo) == BRANCH
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", BRANCH)
+
+
+def test_checkout_pr_branch_fast_forwards_a_local_branch(repo, remote, tmp_path):
+    git_ops.create_branch(BRANCH, cwd=repo)
+    git(repo, "push", "-q", "-u", "origin", BRANCH)
+    git(repo, "checkout", "-q", "main")
+    other = clone(remote, tmp_path)
+    git(other, "checkout", "-q", BRANCH)
+    git(other, "commit", "-q", "--allow-empty", "-m", "newer")
+    git(other, "push", "-q", "origin", BRANCH)
+
+    git_ops.checkout_pr_branch(BRANCH, cwd=repo)
+
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", BRANCH)
+
+
+def test_is_up_to_date_with_main(repo, remote, tmp_path):
+    git_ops.create_branch(BRANCH, cwd=repo)
+    sha = git(repo, "rev-parse", "HEAD")
+    assert git_ops.is_up_to_date_with_main(sha, cwd=repo) is True
+
+    other = clone(remote, tmp_path)
+    git(other, "commit", "-q", "--allow-empty", "-m", "main moved")
+    git(other, "push", "-q", "origin", "main")
+
+    assert git_ops.is_up_to_date_with_main(sha, cwd=repo) is False
+
+
+def test_is_up_to_date_with_main_rejects_bad_shas(repo):
+    with pytest.raises(GitError):
+        git_ops.is_up_to_date_with_main("", cwd=repo)
+    with pytest.raises(GitError):
+        git_ops.is_up_to_date_with_main("0" * 40, cwd=repo)
+
+
+def test_merge_main_into_merges_cleanly(repo, remote, tmp_path):
+    git_ops.create_branch(BRANCH, cwd=repo)
+    (repo / "branch.txt").write_text("branch\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "branch work")
+    other = clone(remote, tmp_path)
+    (other / "main.txt").write_text("main\n")
+    git(other, "add", "-A")
+    git(other, "commit", "-q", "-m", "main work")
+    git(other, "push", "-q", "origin", "main")
+
+    assert git_ops.merge_main_into(BRANCH, cwd=repo) is True
+
+    head = git(repo, "rev-parse", "HEAD")
+    assert git_ops.is_up_to_date_with_main(head, cwd=repo)
+    assert len(git(repo, "rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
+
+
+def test_merge_main_into_aborts_on_a_conflict(repo, remote, tmp_path):
+    git_ops.create_branch(BRANCH, cwd=repo)
+    (repo / "README.md").write_text("branch\n")
+    git(repo, "commit", "-q", "-am", "branch edit")
+    other = clone(remote, tmp_path)
+    (other / "README.md").write_text("main\n")
+    git(other, "commit", "-q", "-am", "main edit")
+    git(other, "push", "-q", "origin", "main")
+
+    assert git_ops.merge_main_into(BRANCH, cwd=repo) is False
+
+    assert git_ops.is_clean(cwd=repo)
+    assert not (repo / ".git" / "MERGE_HEAD").exists()
+
+
+def test_merge_main_into_refuses_main(repo):
+    with pytest.raises(GitError, match="Refusing"):
+        git_ops.merge_main_into("main", cwd=repo)

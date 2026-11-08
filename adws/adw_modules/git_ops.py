@@ -137,3 +137,65 @@ def push_branch(expected_branch: str, cwd: Optional[str] = None) -> None:
 def return_to_main(cwd: Optional[str] = None) -> None:
     """Switch back to main so the next ADW starts clean."""
     _git(["checkout", MAIN_BRANCH], cwd)
+
+
+def head_sha(cwd: Optional[str] = None) -> str:
+    """Return the SHA of the current HEAD commit."""
+    return _git(["rev-parse", "HEAD"], cwd)
+
+
+def checkout_pr_branch(branch: str, cwd: Optional[str] = None) -> None:
+    """Check out a PR's branch and fast-forward it to the remote.
+
+    Raises:
+        GitError: If the branch is main or empty, the tree isn't clean, or git fails
+    """
+    if not branch or branch == MAIN_BRANCH:
+        raise GitError(f"Refusing to check out {branch or 'an empty branch'} as a PR branch")
+    if not is_clean(cwd):
+        raise GitError("Working tree isn't clean. Commit or stash changes first")
+    _git(["fetch", REMOTE], cwd)
+    _git(["checkout", branch], cwd)
+    _git(["pull", "--ff-only", REMOTE, branch], cwd)
+
+
+def is_up_to_date_with_main(sha: str, cwd: Optional[str] = None) -> bool:
+    """Return whether a commit contains the remote's main.
+
+    Raises:
+        GitError: If the SHA is empty or unknown, or git fails
+    """
+    if not sha:
+        raise GitError("Can't check an empty SHA against main")
+    _git(["fetch", REMOTE], cwd)
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", f"{REMOTE}/{MAIN_BRANCH}", sha],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode in (0, 1):
+        return result.returncode == 0
+    detail = result.stderr.strip() or result.stdout.strip()
+    raise GitError(f"git merge-base --is-ancestor failed: {detail}")
+
+
+def merge_main_into(branch: str, cwd: Optional[str] = None) -> bool:
+    """Merge the remote's main into the work branch. Return False on a conflict.
+
+    A conflicting merge is aborted, so the tree is left clean.
+
+    Raises:
+        GitError: If not on the expected work branch, or the fetch fails
+    """
+    ensure_on_work_branch(branch, cwd)
+    _git(["fetch", REMOTE], cwd)
+    try:
+        _git(["merge", "--no-edit", f"{REMOTE}/{MAIN_BRANCH}"], cwd)
+    except GitError:
+        try:
+            _git(["merge", "--abort"], cwd)
+        except GitError:
+            pass
+        return False
+    return True

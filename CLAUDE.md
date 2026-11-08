@@ -11,6 +11,7 @@ An AI tech consultancy app: an LLM chat for software engineering help, with a pa
 See `app_docs/app-shell.md` for the application shell's settings, API and code layout.
 See `app_docs/ci.md` for the CI workflow and how to reproduce it locally.
 See `app_docs/claude-review.md` for the automated Claude PR review and its `claude-review` check.
+See `app_docs/ship.md` for `adw_ship.py`, the PR babysitter, its decision rules and merge modes.
 
 ## Commands
 
@@ -25,6 +26,7 @@ See `app_docs/claude-review.md` for the automated Claude PR review and its `clau
 | Run an ad hoc agent | `./adws/adw_prompt.py "<prompt>"` |
 | Chore: plan, then build | `./adws/adw_chore_implement.py "<prompt>"` |
 | Feature: plan, then build | `./adws/adw_feature_implement.py "<prompt>"` |
+| Ship a PR | `./adws/adw_ship.py <PR>` |
 
 ## Conventions
 
