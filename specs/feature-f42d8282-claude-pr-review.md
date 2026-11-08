@@ -27,7 +27,7 @@ Split the work between an LLM and deterministic code:
 3. **Deterministic CLI (`adws/review_verdict.py`, uv script with `click`):** `post` reads the verdict and the existing PR comments, computes the round from `github-actions[bot]` comments only, posts the summary with `gh pr comment --body-file -`, prints the verdict and exits 0 (APPROVE) or 1 (REQUEST_CHANGES or no valid verdict).
 4. **Workflow (`.github/workflows/claude-review.yml`):** runs on `pull_request` only (never `pull_request_target`). Permissions are least-privilege, and runs are limited to non-draft, same-repo PRs by the owner. It prepares `.review/`, loads the prompt, runs `anthropics/claude-code-action@v1` with `continue-on-error: true`, then runs the CLI. The CLI's exit code decides whether the `claude-review` job is green or red.
 
-Inline comments are posted by the action through the Claude GitHub App token, so they appear as `claude[bot]`. The summary comment is posted with `github.token`, so it appears as `github-actions[bot]`. Round counting counts only `github-actions[bot]` comments that contain a marker, so a human or another bot quoting a marker can't skew the round.
+Inline comments and the summary comment are both posted with the job's `github.token` (the action gets `github_token: ${{ github.token }}`), so they appear as `github-actions[bot]`. The Claude GitHub App's OIDC token exchange is not used: it skips any PR whose workflow file differs from `main`, so PRs that add or change this workflow would never be reviewed. Round counting counts only `github-actions[bot]` comments that contain a marker, so a human or another bot quoting a marker can't skew the round.
 
 ## Relevant Files
 Use these files to implement the feature:
@@ -197,7 +197,6 @@ IMPORTANT: Execute every step in order, top to bottom.
       permissions:
         contents: read
         pull-requests: write
-        id-token: write
       steps:
         - uses: actions/checkout@v4
           with:
@@ -236,6 +235,7 @@ IMPORTANT: Execute every step in order, top to bottom.
           uses: anthropics/claude-code-action@v1
           with:
             claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+            github_token: ${{ github.token }}
             prompt: |
               ${{ steps.prompt.outputs.prompt }}
 
@@ -269,7 +269,7 @@ Short, in the style of `app_docs/ci.md`. Sections:
 - **How it works:** the four steps, the `.review/` files, and the reviewer's tools.
 - **Verdict file and marker:** `.review/review.md` first line `VERDICT: ...`. The summary comment by `github-actions[bot]` ends with `<!-- claude-review verdict: APPROVE|REQUEST_CHANGES round: N -->`. Round = 1 + the number of earlier `github-actions[bot]` comments with a marker. Read the latest verdict from the last marker.
 - **Why the reviewer doesn't use gh:** `.claude/settings.json` denies `Bash(gh:*)` and git writes, and the action runs Claude Code in this repo, so those rules apply. The workflow prepares the context instead, and Python posts the verdict.
-- **Setup:** the `CLAUDE_CODE_OAUTH_TOKEN` repo secret (create it with `claude setup-token`, or with `/install-github-app` in an interactive session), and the Claude GitHub App installed on the repo (the action's OIDC auth uses `id-token: write`).
+- **Setup:** the `CLAUDE_CODE_OAUTH_TOKEN` repo secret (create it with `claude setup-token`, or with `/install-github-app` in an interactive session). The Claude GitHub App isn't needed, because the action uses `github.token`.
 - **Cost:** Sonnet, `--max-turns 30`, 20-minute timeout, drafts skipped, a newer push cancels the older run. Each push to a ready PR is one paid review.
 - **Changing the reviewer:** edit `.claude/commands/review_pr.md` (and `adws/adw_modules/review.py` for the format) through a PR. That PR is reviewed by its own new prompt, because the workflow checks out the PR head.
 - **Run the verdict step locally:** `uv run adws/review_verdict.py post --help`, and the tests in `adws/tests/test_review.py`.
@@ -324,7 +324,7 @@ Execute these commands to validate the feature is complete:
 
 ## Notes
 - **No new dependencies.** `review.py` is stdlib only. `review_verdict.py` declares `click` in its uv script header. `scripts/test.sh` already passes `--with click`.
-- **claude-code-action v1 inputs** (`prompt`, `claude_args`, `claude_code_oauth_token`) and the `mcp__github_inline_comment__create_inline_comment` tool reflect the action's current README. Check them during implementation, as PLAN.md asks, because they evolve. The action needs the Claude GitHub App installed for its OIDC token exchange (`id-token: write`).
+- **claude-code-action v1 inputs** (`prompt`, `claude_args`, `claude_code_oauth_token`) and the `mcp__github_inline_comment__create_inline_comment` tool reflect the action's current README. Check them during implementation, as PLAN.md asks, because they evolve. The action is given `github_token: ${{ github.token }}` so it doesn't depend on the Claude GitHub App's OIDC token exchange.
 - **`checks: write` isn't needed.** PLAN.md lists it, but the check here is the job's own result, not a Checks API call. Least privilege wins; `pull-requests: write` covers the summary comment (PR comments use the issues endpoint, which `pull-requests: write` allows for PRs).
 - **Self-review risk (known, accepted for now):** the workflow checks out the PR head, so a PR that changes `.claude/commands/review_pr.md`, `.claude/settings.json` or `adws/review_verdict.py` is reviewed and judged by its own changed versions. That's acceptable while runs are limited to same-repo PRs by the owner. A later hardening step could load the prompt and verdict script from `base.sha` with `git show` once they exist on `main`. That can't be done in this PR, which introduces them.
 - **Branch protection:** not available on the current private plan, so nothing forces a merge to wait for `claude-review`. `adw_ship.py` (Phase 5b, out of scope) will enforce it by reading `gh pr checks` and the last marker.

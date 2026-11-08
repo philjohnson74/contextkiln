@@ -19,7 +19,7 @@ A GitHub Actions workflow in `.github/workflows/claude-review.yml` has Claude re
 
 1. **Prepare review context:** writes `.review/pr.json` (from `gh pr view`), `.review/diff.patch`, `.review/files.txt` and `.review/comments.json` (the PR's existing comments). `.review/` is gitignored.
 2. **Load review prompt:** reads `.claude/commands/review_pr.md`.
-3. **Run Claude review:** `anthropics/claude-code-action@v1` with tools `Read`, `Glob`, `Grep`, `Write` and `mcp__github_inline_comment__create_inline_comment`. Claude posts inline comments tagged `[blocking]` or `[nit]` (as `claude[bot]`) and writes `.review/review.md`. The step has `continue-on-error: true`, so a crash or timeout still reaches the next step.
+3. **Run Claude review:** `anthropics/claude-code-action@v1` with tools `Read`, `Glob`, `Grep`, `Write` and `mcp__github_inline_comment__create_inline_comment`. Claude posts inline comments tagged `[blocking]` or `[nit]` (as `github-actions[bot]`, using the job's `github.token`) and writes `.review/review.md`. The step has `continue-on-error: true`, so a crash or timeout still reaches the next step.
 4. **Post verdict:** `adws/review_verdict.py post` parses the verdict, posts the summary comment (as `github-actions[bot]`) and exits 0 on APPROVE, 1 otherwise.
 
 ## Verdict file and marker
@@ -45,7 +45,7 @@ The action runs Claude Code inside this repo, so `.claude/settings.json` applies
 ## Setup
 
 - Add the repo secret `CLAUDE_CODE_OAUTH_TOKEN`. Create it with `claude setup-token`, or with `/install-github-app` in an interactive Claude Code session.
-- Install the Claude GitHub App on the repo. The action's OIDC token exchange uses the job's `id-token: write` permission.
+- The Claude GitHub App isn't needed. The action is given `github_token: ${{ github.token }}`, so it skips the app's OIDC token exchange, which refuses to run on a PR whose workflow file differs from `main`. That would block every PR that adds or changes this workflow.
 
 ## Cost
 
