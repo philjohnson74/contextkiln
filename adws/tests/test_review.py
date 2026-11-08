@@ -150,6 +150,76 @@ def test_format_neutralises_injected_marker():
     )
 
 
+# --- diff coverage -------------------------------------------------------
+
+
+def test_parse_diff_coverage_present():
+    summary = "Spec: x\n\nDiff read: 120 of 120 lines\n\nNits: 0"
+    assert review.parse_diff_coverage(summary) == (120, 120)
+
+
+@pytest.mark.parametrize("summary", ["No coverage here", ""])
+def test_parse_diff_coverage_absent(summary):
+    assert review.parse_diff_coverage(summary) is None
+
+
+def test_parse_diff_coverage_last_one_wins():
+    summary = "Diff read: 400 of 900 lines\nmore\nDiff read: 900 of 900 lines"
+    assert review.parse_diff_coverage(summary) == (900, 900)
+
+
+def test_enforce_full_coverage_approve_unchanged():
+    assert review.enforce_coverage("APPROVE", "Diff read: 50 of 50 lines", 50) == (
+        "APPROVE",
+        "Diff read: 50 of 50 lines",
+    )
+
+
+def test_enforce_short_coverage_approve_downgraded():
+    verdict, summary = review.enforce_coverage(
+        "APPROVE", "Diff read: 883 of 1043 lines", 1043
+    )
+    assert verdict == "REQUEST_CHANGES"
+    assert "Downgraded" in summary
+    assert "883 of 1043" in summary
+    assert "Diff read: 883 of 1043 lines" in summary
+
+
+def test_enforce_missing_line_approve_downgraded():
+    verdict, summary = review.enforce_coverage("APPROVE", "Looks fine.", 10)
+    assert verdict == "REQUEST_CHANGES"
+    assert "Downgraded" in summary
+
+
+def test_enforce_total_mismatch_approve_downgraded():
+    verdict, summary = review.enforce_coverage(
+        "APPROVE", "Diff read: 900 of 900 lines", 1043
+    )
+    assert verdict == "REQUEST_CHANGES"
+    assert "Downgraded" in summary
+
+
+def test_enforce_zero_diff_lines_unchanged():
+    assert review.enforce_coverage("APPROVE", "No diff line.", 0) == (
+        "APPROVE",
+        "No diff line.",
+    )
+
+
+def test_enforce_request_changes_short_coverage_gets_note():
+    original = "Diff read: 10 of 100 lines"
+    verdict, summary = review.enforce_coverage("REQUEST_CHANGES", original, 100)
+    assert verdict == "REQUEST_CHANGES"
+    assert len(summary) > len(original)
+    assert "Downgraded" not in summary
+
+
+def test_enforce_request_changes_full_coverage_unchanged():
+    assert review.enforce_coverage(
+        "REQUEST_CHANGES", "Diff read: 100 of 100 lines", 100
+    ) == ("REQUEST_CHANGES", "Diff read: 100 of 100 lines")
+
+
 # --- CLI -----------------------------------------------------------------
 
 
@@ -177,7 +247,7 @@ def posted(review_verdict, monkeypatch):
     return calls
 
 
-def run_post(review_verdict, tmp_path, review_text=None, comments=None):
+def run_post(review_verdict, tmp_path, review_text=None, comments=None, diff_lines=0):
     review_file = tmp_path / "review.md"
     if review_text is not None:
         review_file.write_text(review_text, encoding="utf-8")
@@ -191,6 +261,7 @@ def run_post(review_verdict, tmp_path, review_text=None, comments=None):
             "--pr", "12",
             "--repo", "owner/name",
             "--comments-file", str(comments_file),
+            "--diff-lines", str(diff_lines),
         ],
     )
 
@@ -259,3 +330,54 @@ def test_cli_gh_failure_fails_even_on_approve(review_verdict, monkeypatch, tmp_p
     monkeypatch.setattr(review_verdict, "post_comment", failing)
     result = run_post(review_verdict, tmp_path, "VERDICT: APPROVE\nfine")
     assert result.exit_code == 1
+
+
+def test_cli_approve_full_coverage(review_verdict, posted, tmp_path):
+    result = run_post(
+        review_verdict, tmp_path,
+        "VERDICT: APPROVE\nfine\n\nDiff read: 30 of 30 lines", diff_lines=30,
+    )
+    assert result.exit_code == 0
+    assert posted[0][2].rstrip().endswith("<!-- claude-review verdict: APPROVE round: 1 -->")
+
+
+def test_cli_approve_short_coverage_downgraded(review_verdict, posted, tmp_path):
+    result = run_post(
+        review_verdict, tmp_path,
+        "VERDICT: APPROVE\nfine\n\nDiff read: 883 of 1043 lines", diff_lines=1043,
+    )
+    assert result.exit_code == 1
+    assert len(posted) == 1
+    body = posted[0][2]
+    assert "Downgraded" in body
+    assert review.parse_marker(body) == ("REQUEST_CHANGES", 1)
+
+
+def _invoke_with_diff_lines(review_verdict, tmp_path, extra):
+    review_file = tmp_path / "review.md"
+    review_file.write_text("VERDICT: APPROVE\nfine", encoding="utf-8")
+    comments_file = tmp_path / "comments.json"
+    comments_file.write_text("[]", encoding="utf-8")
+    return CliRunner().invoke(
+        review_verdict.cli,
+        [
+            "post",
+            "--review-file", str(review_file),
+            "--pr", "12",
+            "--repo", "owner/name",
+            "--comments-file", str(comments_file),
+            *extra,
+        ],
+    )
+
+
+def test_cli_missing_diff_lines_is_usage_error(review_verdict, posted, tmp_path):
+    result = _invoke_with_diff_lines(review_verdict, tmp_path, [])
+    assert result.exit_code == 2
+    assert posted == []
+
+
+def test_cli_negative_diff_lines_is_usage_error(review_verdict, posted, tmp_path):
+    result = _invoke_with_diff_lines(review_verdict, tmp_path, ["--diff-lines", "-1"])
+    assert result.exit_code == 2
+    assert posted == []

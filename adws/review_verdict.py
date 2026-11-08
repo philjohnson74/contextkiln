@@ -16,12 +16,15 @@ Usage:
         --review-file .review/review.md \\
         --pr 12 \\
         --repo owner/name \\
-        --comments-file .review/comments.json
+        --comments-file .review/comments.json \\
+        --diff-lines 1043
 
 Exit codes:
     0  The verdict is APPROVE and the summary comment was posted.
     1  The verdict is REQUEST_CHANGES, there is no valid verdict, the
-       comments file is invalid, or posting the comment failed.
+       comments file is invalid, or posting the comment failed. An APPROVE
+       without full diff coverage (`Diff read: N of M lines`) is downgraded
+       to REQUEST_CHANGES and exits 1.
 """
 
 import json
@@ -72,7 +75,9 @@ def cli():
 @click.option("--repo", type=str, required=True, help="Repository as owner/name.")
 @click.option("--comments-file", type=click.Path(exists=True, dir_okay=False),
               required=True, help="JSON list of the PR's issue comments.")
-def post(review_file, pr, repo, comments_file):
+@click.option("--diff-lines", type=click.IntRange(min=0), required=True,
+              help="Line count of .review/diff.patch; 0 means nothing to read.")
+def post(review_file, pr, repo, comments_file, diff_lines):
     """Post the summary comment with its marker; exit 0 only on APPROVE."""
     try:
         with open(comments_file, encoding="utf-8") as f:
@@ -97,7 +102,9 @@ def post(review_file, pr, repo, comments_file):
     except ValueError as exc:
         valid, reason = False, str(exc)
 
-    if not valid:
+    if valid:
+        verdict, summary = review.enforce_coverage(verdict, summary, diff_lines)
+    else:
         verdict = "REQUEST_CHANGES"
         summary = review.no_verdict_summary(reason)
 
