@@ -325,6 +325,8 @@ class ShipHarness:
         self.last_pr = None
         self.up_to_date = True
         self.merge_ok = True
+        self.update_sha = SHA_B  # The local head after merging main into the branch
+        self.merged_head = None
         self.pushes = []
         self.commits = []
         self.agent_writes = True
@@ -353,9 +355,9 @@ class ShipHarness:
         mp.setattr(git_ops, "is_clean", lambda cwd=None: self.clean)
         mp.setattr(git_ops, "current_branch", lambda cwd=None: self.branch)
         mp.setattr(git_ops, "checkout_pr_branch", self.checkout)
-        mp.setattr(git_ops, "head_sha", lambda cwd=None: self.local_head or self.last_pr.head_sha)
+        mp.setattr(git_ops, "head_sha", self.head_sha)
         mp.setattr(git_ops, "is_up_to_date_with_main", self.is_up_to_date)
-        mp.setattr(git_ops, "merge_main_into", lambda branch, cwd=None: self.merge_ok)
+        mp.setattr(git_ops, "merge_main_into", self.merge_main_into)
         mp.setattr(git_ops, "ensure_on_work_branch", lambda branch, cwd=None: None)
         mp.setattr(git_ops, "commit_all", self.commit_all)
         mp.setattr(git_ops, "push_branch", lambda branch, cwd=None: self.pushes.append(branch))
@@ -389,8 +391,17 @@ class ShipHarness:
         self.clean = True
         return NEW_SHA
 
+    def head_sha(self, cwd=None):
+        return self.local_head or self.merged_head or self.last_pr.head_sha
+
+    def merge_main_into(self, branch, cwd=None):
+        if self.merge_ok:
+            self.merged_head = self.update_sha
+        return self.merge_ok
+
     def return_to_main(self, cwd=None):
         self.branch = "main"
+        self.merged_head = None
 
     def execute_template(self, request):
         self.requests.append(request)
@@ -405,19 +416,20 @@ class ShipHarness:
     def now(self):
         return self.clock
 
+    def options(self, merge="never", max_rounds=3, timeout=1800, poll=60):
+        return ShipOptions(
+            pr=7,
+            profile="claude",
+            max_rounds=max_rounds,
+            merge_mode=merge,
+            poll_interval=poll,
+            timeout=timeout,
+            working_dir=str(self.cwd),
+        )
+
     def run(self, merge="never", max_rounds=3, timeout=1800, poll=60):
         return ship.run_ship(
-            ShipOptions(
-                pr=7,
-                profile="claude",
-                max_rounds=max_rounds,
-                merge_mode=merge,
-                poll_interval=poll,
-                timeout=timeout,
-                working_dir=str(self.cwd),
-            ),
-            sleep=self.sleep,
-            now=self.now,
+            self.options(merge, max_rounds, timeout, poll), sleep=self.sleep, now=self.now
         )
 
     def names(self):
@@ -638,3 +650,51 @@ def test_summary_and_run_log_fields(harness, runs_log):
     summary = summary_file(runs_log, entry["adw_id"])
     assert summary["exit_code"] == 0
     assert summary["decisions"][0]["action"] == "hand_over"
+
+
+# --- stale head ---------------------------------------------------------------
+
+
+def test_stale_head_after_a_fix_push_waits(harness, runs_log):
+    # The second read is stale: GitHub still reports the old head and its failed checks
+    harness.prs = [pr(review=RED), pr(review=RED), pr(sha=NEW_SHA)]
+    harness.issue_comments = [issue_comment(f"Please fix. {MARKER_CHANGES}")]
+    harness.review_comments = [inline(55, body="[blocking] handle None")]
+
+    assert harness.run(merge="never") == 0
+
+    assert len(harness.requests) == 1
+    assert harness.names().count("checkout_pr_branch") == 1
+    assert harness.sleeps == [60]
+    entry = run_log(runs_log)[-1]
+    decisions = summary_file(runs_log, entry["adw_id"])["decisions"]
+    assert {"action": "wait", "reason": "waiting for GitHub to report abc1234", "head_sha": SHA_A} in decisions
+    assert entry["rounds"] == 1
+    assert entry["outcome"] == "handed_over"
+
+
+def test_stale_head_after_an_update_waits(harness):
+    harness.prs = [pr(), pr(), pr(sha=SHA_B)]
+    harness.up_to_date = [False, True, True]
+    assert harness.run(merge="auto", max_rounds=0) == 0
+    assert harness.pushes == ["adw/feature-1-x"]
+    assert harness.sleeps == [60]
+    assert harness.merges == [(7, SHA_B)]
+
+
+def test_stale_head_times_out(harness):
+    harness.prs = [pr(ci=RED), pr(ci=RED)]
+    assert harness.run(timeout=120, poll=60) == 1
+    assert len(harness.requests) == 1
+    assert "timed out waiting for GitHub to report abc1234" in harness.comments[-1]
+
+
+def test_run_ship_with_summary_uses_the_given_adw_id(harness, runs_log):
+    code, summary = ship.run_ship_with_summary(
+        harness.options(), sleep=harness.sleep, now=harness.now, adw_id="sdlc1234"
+    )
+    assert code == 0
+    assert summary["outcome"] == "handed_over"
+    assert summary["adw_id"] == "sdlc1234"
+    assert run_log(runs_log)[-1]["adw_id"] == "sdlc1234"
+    assert (runs_log.parent / "sdlc1234" / "ship_summary.json").exists()

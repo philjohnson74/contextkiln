@@ -4,6 +4,9 @@ Control flow is deterministic Python: `decide()` turns the PR's state into one
 action, and `run_ship()` carries it out through the git and gh wrappers. Agents
 only edit code and write text. They never run git writes or gh.
 
+After each push, the loop waits until GitHub reports the pushed SHA as the PR's
+head before deciding again, so it never acts on the old head's checks.
+
 Review comments, review summaries, PR bodies and CI logs are untrusted input.
 Only comments from `github-actions[bot]` and the repo owner are used, and they
 reach agents as files marked as untrusted data.
@@ -58,6 +61,8 @@ PROTECTED_FILES = (
     "adws/adw_modules/review.py",
     "adws/adw_modules/ship.py",
     "adws/adw_ship.py",
+    "adws/adw_sdlc.py",
+    "adws/adw_modules/sdlc.py",
 )
 
 _PASS_OR_FAIL = ("SUCCESS", "FAILURE")
@@ -372,6 +377,7 @@ class _Run:
     rounds_used: int = 0
     last_feedback: Optional[ReviewFeedback] = None
     issue_comments: List[Dict[str, Any]] = field(default_factory=list)
+    expected_head: Optional[str] = None  # the SHA we last pushed
 
     @property
     def cwd(self) -> str:
@@ -531,18 +537,23 @@ def _fix_round(run: _Run, action: Action, pr: PullRequest, round_no: int) -> str
     return sha
 
 
-def _update_branch(run: _Run, pr: PullRequest) -> None:
-    """Merge origin/main into the PR branch and push it. No round is spent."""
+def _update_branch(run: _Run, pr: PullRequest) -> str:
+    """Merge origin/main into the PR branch and push it. Return the new head SHA.
+
+    No round is spent.
+    """
     cwd = run.cwd
     _checkout_head(run, pr)
     if not git_ops.merge_main_into(pr.head_branch, cwd=cwd):
         raise _Escalate("merge conflict with main")
     tests = run_tests(cwd)
     git_ops.push_branch(pr.head_branch, cwd=cwd)
+    sha = git_ops.head_sha(cwd=cwd)
     run.summary.setdefault("updates", []).append(
-        {"head_sha": pr.head_sha, "tests_passed": tests.passed}
+        {"head_sha": pr.head_sha, "sha": sha, "tests_passed": tests.passed}
     )
     git_ops.return_to_main(cwd=cwd)
+    return sha
 
 
 def _pre_merge_ok(run: _Run, head_sha: str) -> bool:
@@ -600,6 +611,17 @@ def _ship(
             pr = github.get_pr(options.pr, cwd=cwd)
             if pr.state == "OPEN" and pr.author != run.owner:
                 raise _Escalate("only PRs opened by the repo owner are shipped")
+            if run.expected_head and pr.state == "OPEN" and pr.head_sha != run.expected_head:
+                # Right after a push, GitHub can still report the old head and checks
+                reason = f"waiting for GitHub to report {run.expected_head[:7]}"
+                console.print(Rule(f"{Action.WAIT.value}: {reason}"))
+                summary["decisions"].append(
+                    {"action": Action.WAIT.value, "reason": reason, "head_sha": pr.head_sha}
+                )
+                if now() >= deadline:
+                    raise _Escalate(f"timed out {reason}")
+                sleep(options.poll_interval)
+                continue
             run.issue_comments = github.list_issue_comments(options.pr, cwd=cwd)
 
             ci, rev = pr.checks.get(CI_CHECK), pr.checks.get(REVIEW_CHECK)
@@ -635,14 +657,14 @@ def _ship(
                 continue
 
             if action in (Action.FIX_CI, Action.ADDRESS_REVIEW):
-                _fix_round(run, action, pr, run.rounds_used + 1)
+                run.expected_head = _fix_round(run, action, pr, run.rounds_used + 1)
                 run.rounds_used += 1
                 summary["rounds"] = run.rounds_used
                 deadline = now() + options.timeout
                 continue
 
             if action == Action.UPDATE_BRANCH:
-                _update_branch(run, pr)
+                run.expected_head = _update_branch(run, pr)
                 deadline = now() + options.timeout
                 continue
 
@@ -687,14 +709,15 @@ def _append_run_log(entry: Dict[str, Any]) -> None:
         print(f"Warning: could not write run log: {e}", file=sys.stderr)
 
 
-def run_ship(
+def run_ship_with_summary(
     options: ShipOptions,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.monotonic,
-) -> int:
-    """Babysit one PR and return the process exit code."""
+    adw_id: Optional[str] = None,
+) -> Tuple[int, Dict[str, Any]]:
+    """Babysit one PR and return the process exit code and the ship summary."""
     console = Console()
-    adw_id = agent.generate_short_id()
+    adw_id = adw_id or agent.generate_short_id()
     summary: Dict[str, Any] = {"adw_id": adw_id, **asdict(options)}
     summary["model"] = get_profile(options.profile).model
     start = now()
@@ -748,4 +771,14 @@ def run_ship(
                 "duration_ms": int((now() - start) * 1000),
             }
         )
-    return code
+    return code, summary
+
+
+def run_ship(
+    options: ShipOptions,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.monotonic,
+    adw_id: Optional[str] = None,
+) -> int:
+    """Babysit one PR and return the process exit code."""
+    return run_ship_with_summary(options, sleep=sleep, now=now, adw_id=adw_id)[0]
