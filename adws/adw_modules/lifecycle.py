@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from rich.console import Console
@@ -27,7 +27,7 @@ from github import GitHubError
 from health import run_health_checks
 from models import DEFAULT_PROFILE, PROFILE_NAMES, get_profile
 
-COMMIT_TYPES = {"chore": "chore", "feature": "feat"}
+COMMIT_TYPES = {"chore": "chore", "feature": "feat", "bug": "fix"}
 MAX_SUBJECT_LENGTH = 72
 MAX_TEST_OUTPUT_CHARS = 3000
 TEST_TIMEOUT_SECONDS = 900
@@ -51,6 +51,8 @@ class WorkflowOptions:
     build_profile: str
     no_pr: bool
     working_dir: str
+    # False opens a ready PR even when local tests fail, so adw_ship can fix it
+    draft_on_test_failure: bool = True
 
 
 @dataclass(frozen=True)
@@ -308,7 +310,13 @@ def _lifecycle(
     body = build_pr_body(
         pr_summary, plan_path, tests, read_run_stats(adw_id), issue.number if issue else None
     )
-    url = github.create_pr(title, body, branch, draft=not tests.passed, cwd=cwd)
+    url = github.create_pr(
+        title,
+        body,
+        branch,
+        draft=(not tests.passed) and options.draft_on_test_failure,
+        cwd=cwd,
+    )
     summary["pr_url"] = url
     console.print(f"[cyan]PR:[/cyan] {url}")
 
@@ -319,13 +327,15 @@ def _lifecycle(
     return 0 if tests.passed else 1
 
 
-def run_workflow(options: WorkflowOptions) -> int:
-    """Run the whole lifecycle and return the process exit code.
+def run_lifecycle(
+    options: WorkflowOptions, adw_id: Optional[str] = None
+) -> Tuple[int, Dict[str, Any]]:
+    """Run the whole lifecycle and return the exit code and the summary.
 
     A failure leaves the checkout on the work branch, so the work can be inspected.
     """
     console = Console()
-    adw_id = agent.generate_short_id()
+    adw_id = adw_id or agent.generate_short_id()
     summary: Dict[str, Any] = {"adw_id": adw_id, **asdict(options)}
     summary["plan_model"] = get_profile(options.plan_profile).model
     summary["build_model"] = get_profile(options.build_profile).model
@@ -350,7 +360,12 @@ def run_workflow(options: WorkflowOptions) -> int:
 
     summary["exit_code"] = code
     console.print(f"[cyan]Summary:[/cyan] {_write_summary(adw_id, summary)}")
-    return code
+    return code, summary
+
+
+def run_workflow(options: WorkflowOptions) -> int:
+    """Run the whole lifecycle and return the process exit code."""
+    return run_lifecycle(options)[0]
 
 
 def build_cli(adw_type: str) -> click.Command:

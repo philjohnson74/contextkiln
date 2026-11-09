@@ -9,6 +9,8 @@
 
 Every decision is made by deterministic Python (`decide()` in `adws/adw_modules/ship.py`). Agents only edit files and write text. Python runs all git and gh commands. See [claude-review.md](claude-review.md) for the review pipeline it reacts to.
 
+`adw_sdlc.py` reuses it through `run_ship_with_summary`, passing its own `adw_id` so all of a run's artefacts share one folder. See [sdlc.md](sdlc.md).
+
 ## Usage
 
 ```bash
@@ -61,13 +63,14 @@ The script escalates rather than spending a fix round on an infrastructure failu
 
 ## Protected paths
 
-A PR that changes the reviewer or the shipper would be judged by its own new code. So any PR that touches `.github/`, `.claude/`, `adws/review_verdict.py`, `adws/adw_modules/review.py`, `adws/adw_modules/ship.py` or `adws/adw_ship.py` is never merged by the script. Once it's approved and green, it gets `needs-human`.
+A PR that changes the reviewer or the shipper would be judged by its own new code. So any PR that touches `.github/`, `.claude/`, `adws/review_verdict.py`, `adws/adw_modules/review.py`, `adws/adw_modules/ship.py`, `adws/adw_ship.py`, `adws/adw_sdlc.py` or `adws/adw_modules/sdlc.py` is never merged by the script. Once it's approved and green, it gets `needs-human`.
 
 ## Rounds
 
 - Only fix pushes (FIX_CI, ADDRESS_REVIEW) count as rounds. Infrastructure failures and branch updates don't.
 - Rounds are counted per run. Running the script again on the same PR starts again at 0.
 - `--timeout` bounds each wait for checks. It restarts after every push.
+- **Stale head:** right after a push, GitHub can still report the old head and its checks for a few seconds. So after each push the script waits, within the same `--timeout`, until GitHub reports the pushed SHA before deciding again. If it never does, the PR escalates with "timed out waiting for GitHub to report <sha>".
 
 ## Merge modes and the trust ramp
 

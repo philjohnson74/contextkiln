@@ -214,3 +214,86 @@ def test_comment_on_pr_sends_the_body_on_stdin(fake_gh):
 def test_repo_owner(fake_gh):
     fake_gh.stdout = "owner\n"
     assert github.repo_owner() == "owner"
+
+
+def test_get_issue_reads_labels_and_state(fake_gh):
+    fake_gh.stdout = json.dumps(
+        {
+            "title": "A bug",
+            "body": "Details",
+            "author": {"login": "someone"},
+            "labels": [{"name": "bug"}],
+            "state": "OPEN",
+        }
+    )
+    issue = github.get_issue(7)
+    assert issue.labels == ("bug",)
+    assert issue.state == "OPEN"
+    cmd = fake_gh.calls[0]["cmd"]
+    fields = cmd[cmd.index("--json") + 1].split(",")
+    assert "labels" in fields and "state" in fields
+
+
+def _issue_json(number, labels):
+    return {
+        "number": number,
+        "title": f"Issue {number}",
+        "body": "",
+        "author": {"login": "owner"},
+        "labels": [{"name": label} for label in labels],
+        "state": "OPEN",
+    }
+
+
+def test_list_issues_builds_label_filters(fake_gh):
+    fake_gh.stdout = json.dumps([_issue_json(3, ["adw-ready"]), _issue_json(4, ["adw-ready", "bug"])])
+    issues = github.list_issues(["adw-ready"])
+    cmd = fake_gh.calls[0]["cmd"]
+    assert cmd[:5] == ["gh", "issue", "list", "--state", "open"]
+    i = cmd.index("--label")
+    assert cmd[i : i + 2] == ["--label", "adw-ready"]
+    assert [issue.number for issue in issues] == [3, 4]
+    assert all(isinstance(issue, github.Issue) for issue in issues)
+    assert issues[1].labels == ("adw-ready", "bug")
+    assert issues[0].author == "owner"
+
+
+def test_list_issues_with_no_output(fake_gh):
+    fake_gh.stdout = ""
+    assert github.list_issues(["adw-ready"]) == []
+
+
+def test_close_issue_passes_the_comment(fake_gh):
+    github.close_issue(7, "Closed by ADW x")
+    assert fake_gh.calls[0]["cmd"] == ["gh", "issue", "close", "7", "--comment", "Closed by ADW x"]
+
+
+@pytest.mark.parametrize("returncodes", [[0, 0], [1, 0]])
+def test_add_issue_label_uses_issue_edit(fake_gh, returncodes):
+    fake_gh.returncodes = list(returncodes)
+    github.add_issue_label(7, "adw-in-progress")
+    assert fake_gh.calls[0]["cmd"] == ["gh", "label", "create", "adw-in-progress", "--force"]
+    assert fake_gh.calls[1]["cmd"] == [
+        "gh", "issue", "edit", "7", "--add-label", "adw-in-progress"
+    ]
+
+
+def test_remove_label(fake_gh):
+    github.remove_label(7, "adw-in-progress")
+    assert fake_gh.calls[0]["cmd"] == [
+        "gh", "issue", "edit", "7", "--remove-label", "adw-in-progress"
+    ]
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [("https://github.com/o/r/pull/9", 9), ("https://github.com/o/r/pull/9/", 9)],
+)
+def test_pr_number_from_url(url, expected):
+    assert github.pr_number_from_url(url) == expected
+
+
+@pytest.mark.parametrize("url", ["https://github.com/o/r/issues/9", "", "pull/abc"])
+def test_pr_number_from_url_rejects_other_urls(url):
+    with pytest.raises(GitHubError):
+        github.pr_number_from_url(url)

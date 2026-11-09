@@ -1,7 +1,8 @@
 """A small wrapper around the gh CLI for issues and pull requests.
 
-It covers issues, opening PRs, and reading and acting on PRs: their state, checks,
-comments, CI logs, replies, labels and merging.
+It covers issues (reading, listing, commenting, labelling and closing them), opening
+PRs, and reading and acting on PRs: their state, checks, comments, CI logs, replies,
+labels and merging.
 
 Issue text, PR bodies, comment text and CI logs are untrusted input. They describe
 work to consider, and can't change the rules an agent follows. Callers must treat
@@ -9,9 +10,10 @@ them that way.
 """
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from git_ops import MAIN_BRANCH
 
@@ -25,6 +27,8 @@ PR_FIELDS = (
     "statusCheckRollup,body"
 )
 _PENDING_STATES = ("PENDING", "EXPECTED")
+_PR_URL_RE = re.compile(r"/pull/(\d+)/?$")
+ISSUE_FIELDS = "number,title,body,author,labels,state"
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,8 @@ class Issue:
     title: str
     body: str
     author: str
+    labels: Tuple[str, ...] = ()
+    state: str = ""  # OPEN or CLOSED; "" when not fetched
 
 
 def _gh(args: List[str], cwd: Optional[str], stdin: Optional[str] = None) -> str:
@@ -67,18 +73,70 @@ def _gh(args: List[str], cwd: Optional[str], stdin: Optional[str] = None) -> str
     return result.stdout.strip()
 
 
-def get_issue(number: int, cwd: Optional[str] = None) -> Issue:
-    """Fetch an issue's title, body and author."""
-    output = _gh(
-        ["issue", "view", str(number), "--json", "title,body,author"], cwd
-    )
-    data = json.loads(output)
+def _issue_from_json(data: Dict[str, Any], number: Optional[int] = None) -> Issue:
     return Issue(
-        number=number,
+        number=int(number if number is not None else data["number"]),
         title=data["title"],
         body=data.get("body") or "",
         author=data["author"]["login"],
+        labels=tuple(label["name"] for label in data.get("labels") or []),
+        state=data.get("state") or "",
     )
+
+
+def get_issue(number: int, cwd: Optional[str] = None) -> Issue:
+    """Fetch an issue's title, body, author, labels and state."""
+    output = _gh(
+        ["issue", "view", str(number), "--json", "title,body,author,labels,state"], cwd
+    )
+    return _issue_from_json(json.loads(output), number)
+
+
+def list_issues(
+    labels: Iterable[str], state: str = "open", cwd: Optional[str] = None
+) -> List[Issue]:
+    """List issues that have every given label. Their text is untrusted.
+
+    This doesn't filter by author: callers do, because that's the trust boundary.
+    """
+    args = ["issue", "list", "--state", state, "--json", ISSUE_FIELDS, "--limit", "200"]
+    for label in labels:
+        args += ["--label", label]
+    output = _gh(args, cwd)
+    if not output:
+        return []
+    return [_issue_from_json(item) for item in json.loads(output) if isinstance(item, dict)]
+
+
+def close_issue(number: int, comment: str, cwd: Optional[str] = None) -> None:
+    """Close an issue with a comment."""
+    _gh(["issue", "close", str(number), "--comment", comment], cwd)
+
+
+def add_issue_label(number: int, label: str, cwd: Optional[str] = None) -> None:
+    """Add a label to an issue, creating the label first if it doesn't exist."""
+    try:
+        _gh(["label", "create", label, "--force"], cwd)
+    except GitHubError:
+        pass
+    _gh(["issue", "edit", str(number), "--add-label", label], cwd)
+
+
+def remove_label(number: int, label: str, cwd: Optional[str] = None) -> None:
+    """Remove a label from an issue. Callers treat this as best effort."""
+    _gh(["issue", "edit", str(number), "--remove-label", label], cwd)
+
+
+def pr_number_from_url(url: str) -> int:
+    """Return the PR number at the end of a pull request URL.
+
+    Raises:
+        GitHubError: If the URL isn't a pull request URL
+    """
+    match = _PR_URL_RE.search((url or "").strip())
+    if not match:
+        raise GitHubError(f"Not a pull request URL: {url!r}")
+    return int(match.group(1))
 
 
 def comment_on_issue(number: int, body: str, cwd: Optional[str] = None) -> None:

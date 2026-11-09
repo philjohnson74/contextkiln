@@ -10,6 +10,7 @@ Executable scripts that combine deterministic Python with Claude Code agents. Ea
 | `adw_chore_implement.py "<prompt>"` | Plans and builds a chore with `/chore` and `/implement`, then opens a PR |
 | `adw_feature_implement.py "<prompt>"` | Plans and builds a feature with `/feature` and `/implement`, then opens a PR |
 | `adw_ship.py <PR>` | Babysits a PR: waits for ci and claude-review, fixes CI failures and blocking review comments, keeps it up to date with main, then merges or hands over (`--merge never\|label\|auto`). Escalates with a needs-human label |
+| `adw_sdlc.py ["<prompt>" \| --issue N]` | Runs the whole lifecycle end to end: plans, builds and tests, opens a ready PR, ships it with `adw_ship`, then closes or comments on the issue. With no argument it picks the oldest `adw-ready` issue opened by the repo owner |
 | `review_verdict.py post ...` | Used by the Claude review workflow. Posts the review summary with its verdict marker, exits 0 on APPROVE and 1 otherwise |
 
 Before starting any workflow, run `adw_health_check.py` to ensure all tools and dependencies are properly configured.
@@ -21,6 +22,8 @@ Before starting any workflow, run `adw_health_check.py` to ensure all tools and 
 `adw_modules/review.py` parses the reviewer's verdict file and builds and reads the `<!-- claude-review verdict: ... round: N -->` marker. See [claude-review.md](../app_docs/claude-review.md).
 
 `adw_modules/ship.py` holds the decision logic and the loop for `adw_ship.py`. See [ship.md](../app_docs/ship.md).
+
+`adw_modules/sdlc.py` composes the lifecycle and ship for `adw_sdlc.py`. See [sdlc.md](../app_docs/sdlc.md).
 
 ## Requirements
 

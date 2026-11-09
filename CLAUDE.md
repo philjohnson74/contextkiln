@@ -12,6 +12,7 @@ See `app_docs/app-shell.md` for the application shell's settings, API and code l
 See `app_docs/ci.md` for the CI workflow and how to reproduce it locally.
 See `app_docs/claude-review.md` for the automated Claude PR review and its `claude-review` check.
 See `app_docs/ship.md` for `adw_ship.py`, the PR babysitter, its decision rules and merge modes.
+See `app_docs/sdlc.md` for `adw_sdlc.py`, the end-to-end workflow, its issue trust rule, labels and outcomes.
 
 ## Commands
 
@@ -27,6 +28,7 @@ See `app_docs/ship.md` for `adw_ship.py`, the PR babysitter, its decision rules 
 | Chore: plan, then build | `./adws/adw_chore_implement.py "<prompt>"` |
 | Feature: plan, then build | `./adws/adw_feature_implement.py "<prompt>"` |
 | Ship a PR | `./adws/adw_ship.py <PR>` |
+| Ship an issue end to end | `./adws/adw_sdlc.py --issue <N>` |
 
 ## Conventions
 

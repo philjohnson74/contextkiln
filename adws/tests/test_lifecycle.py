@@ -47,7 +47,7 @@ class Harness:
     def execute_template(self, request):
         self.requests.append(request)
         command = request.slash_command
-        if command in ("/chore", "/feature") and self.write_plan:
+        if command in ("/chore", "/feature", "/bug") and self.write_plan:
             specs = self.cwd / "specs"
             specs.mkdir(exist_ok=True)
             name = f"{command[1:]}-{request.adw_id}-the-thing.md"
@@ -63,18 +63,28 @@ class Harness:
         self.prs.append({"title": title, "body": body, "head": head, "draft": draft})
         return "https://github.com/o/r/pull/9"
 
-    def run(self, adw_type="chore", prompt="Add the thing", issue=None, no_pr=False):
-        return lifecycle.run_workflow(
-            WorkflowOptions(
-                adw_type=adw_type,
-                prompt=prompt,
-                issue=issue,
-                plan_profile="claude",
-                build_profile="local",
-                no_pr=no_pr,
-                working_dir=str(self.cwd),
-            )
+    def run(
+        self,
+        adw_type="chore",
+        prompt="Add the thing",
+        issue=None,
+        no_pr=False,
+        draft_on_test_failure=True,
+        adw_id=None,
+    ):
+        options = WorkflowOptions(
+            adw_type=adw_type,
+            prompt=prompt,
+            issue=issue,
+            plan_profile="claude",
+            build_profile="local",
+            no_pr=no_pr,
+            working_dir=str(self.cwd),
+            draft_on_test_failure=draft_on_test_failure,
         )
+        if adw_id is not None:
+            return lifecycle.run_lifecycle(options, adw_id=adw_id)
+        return lifecycle.run_workflow(options)
 
     def commands(self):
         return [r.slash_command for r in self.requests]
@@ -154,6 +164,35 @@ def test_failing_tests_open_a_draft_with_the_output(harness, repo):  # noqa: F81
     assert "**failed**" in pr["body"]
     assert "boom ''' failure" in pr["body"]
     assert git(repo, "branch", "--show-current") == "main"
+
+
+def test_draft_on_test_failure_false_opens_a_ready_pr(harness):
+    harness.tests = TestResult(False, "boom")
+    assert harness.run(draft_on_test_failure=False) == 1
+    pr = harness.prs[0]
+    assert pr["draft"] is False
+    assert "**failed**" in pr["body"]
+
+
+def test_run_lifecycle_returns_the_summary_and_uses_the_given_adw_id(harness, runs_log):
+    code, summary = harness.run(adw_id="sdlc1234")
+    assert code == 0
+    assert summary["adw_id"] == "sdlc1234"
+    assert summary["pr_url"] == "https://github.com/o/r/pull/9"
+    assert summary["tests_passed"] is True
+    assert summary["plan_path"].startswith("specs/chore-sdlc1234-")
+    assert "thing.txt" in summary["changed_files"]
+    assert all(r.adw_id == "sdlc1234" for r in harness.requests)
+    assert (runs_log.parent / "sdlc1234" / "workflow_summary.json").exists()
+
+
+def test_bug_workflow_uses_bug_commands(harness):
+    harness.outputs["/commit"] = "garbage"
+    harness.outputs["/pull_request"] = "garbage"
+    assert harness.run(adw_type="bug") == 0
+    assert harness.commands()[0] == "/bug"
+    assert harness.prs[0]["title"].startswith("fix: ")
+    assert harness.prs[0]["head"].startswith("adw/bug-")
 
 
 def test_no_pr_commits_locally_and_leaves_github_alone(harness, repo, remote):  # noqa: F811
