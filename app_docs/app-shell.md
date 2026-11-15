@@ -1,6 +1,16 @@
 # App shell
 
-A chat page for software engineering and infrastructure questions, with a "Talk to a human" button. There's no auth, payment or human dashboard yet.
+A chat page for software engineering and infrastructure questions, with a conversation history sidebar and a "Talk to a human" button. There's no auth, payment or human dashboard yet.
+
+## Conversation sidebar
+
+The left-hand sidebar lists past conversations (newest first) and allows switching between them. Clicking one loads its messages into the chat and makes it the active conversation. A "New conversation" button resets the chat to the empty state. After the first reply in a new conversation finishes, the list refreshes so the new conversation appears at the top, highlighted. On screens under 640px the sidebar sits above the chat.
+
+The conversation buttons and "New conversation" are disabled while a reply streams. Switching conversations clears any error and resets the escalation state. If the list or a conversation fails to load, an error is shown and the current chat stays as it is.
+
+The sidebar is implemented in `Sidebar.tsx` and uses the following API helpers:
+- `listConversations()` - fetches the conversation list from `/api/conversations`
+- `getMessages(id)` - fetches messages for a specific conversation from `/api/conversations/{id}/messages`
 
 ## Run it
 
@@ -44,4 +54,5 @@ sqlite3 apps/backend/contextkiln.db "SELECT * FROM escalations"
 - `apps/backend/app/llm.py`: the `LLMProvider` protocol, `OpenAICompatibleProvider` and the system prompt. Add new providers to `build_provider`.
 - `apps/backend/app/db.py`: the `conversations`, `messages` and `escalations` tables.
 - `apps/backend/app/main.py`: the routes.
-- `apps/frontend/src/api.ts` and `App.tsx`: the stream parser and the chat page.
+- `apps/frontend/src/api.ts` and `App.tsx`: the stream parser, the API helpers and the chat page.
+- `apps/frontend/src/Sidebar.tsx`: the conversation history sidebar.

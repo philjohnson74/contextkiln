@@ -4,6 +4,19 @@ export type ChatEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
+export interface ConversationSummary {
+  id: string;
+  created_at: string;
+  title: string;
+  message_count: number;
+}
+
+export interface StoredMessage {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
 export interface Escalation {
   id: number;
   conversation_id: string;
@@ -40,6 +53,24 @@ export async function streamChat(
       if (line.trim()) onEvent(JSON.parse(line) as ChatEvent);
     }
   }
+}
+
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const response = await fetch("/api/conversations");
+  if (!response.ok) {
+    throw new Error(`Conversations request failed with status ${response.status}`);
+  }
+  const data = await response.json();
+  return data.conversations;
+}
+
+export async function getMessages(id: string): Promise<StoredMessage[]> {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
+  if (!response.ok) {
+    throw new Error(`Messages request failed with status ${response.status}`);
+  }
+  const data = await response.json();
+  return data.messages;
 }
 
 export async function createEscalation(conversationId: string): Promise<Escalation> {

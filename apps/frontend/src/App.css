@@ -33,13 +33,58 @@ body {
   color: var(--text);
 }
 
+.app {
+  display: flex;
+  height: 100dvh;
+}
+
 .chat {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  min-width: 0;
   max-width: 800px;
-  margin: 0 auto;
   padding: 0 16px;
+}
+
+.sidebar {
+  width: 240px;
+  border-right: 1px solid var(--border);
+  padding: 16px 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar button {
+  width: 100%;
+  text-align: left;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar button.active {
+  background: var(--reply-bg);
+  border-left: 4px solid var(--border);
+}
+
+@media (max-width: 639px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    max-height: 30dvh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 .chat-header {
