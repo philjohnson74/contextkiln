@@ -183,8 +183,8 @@ def test_list_conversations_returns_newest_first_with_title_and_count(client, db
 
 def test_list_conversations_breaks_created_at_ties_by_creation_order(client, db):
     # Create two conversations with same created_at
-    conv1 = db.create_conversation("a")
-    conv2 = db.create_conversation("b")
+    db.create_conversation("a")
+    db.create_conversation("b")
 
     # Set both to same created_at time
     with db._connect() as conn:
@@ -206,7 +206,7 @@ def test_list_conversations_breaks_created_at_ties_by_creation_order(client, db)
 
 def test_list_conversations_cuts_long_titles_to_60_characters(client, db):
     # Create a conversation with a long first message
-    long_message = "A" * 61  # 61 characters
+    long_message = "é" * 61  # 61 non-ASCII characters
     db.create_conversation("long")
     db.add_message("long", "user", long_message)
 
@@ -219,6 +219,16 @@ def test_list_conversations_cuts_long_titles_to_60_characters(client, db):
     assert len(body["conversations"][0]["title"]) == 60
     assert body["conversations"][0]["title"] == long_message[:59] + "…"
     assert body["conversations"][0]["message_count"] == 1
+
+
+def test_list_conversations_keeps_a_60_character_title_unchanged(client, db):
+    db.create_conversation("exact")
+    db.add_message("exact", "user", "B" * 60)
+
+    response = client.get("/api/conversations")
+
+    assert response.status_code == 200
+    assert response.json()["conversations"][0]["title"] == "B" * 60
 
 
 def test_list_conversations_title_is_the_first_user_message(client, db):
