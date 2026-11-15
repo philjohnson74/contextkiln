@@ -32,6 +32,39 @@ def test_chat_stores_both_messages(client, db):
     ]
 
 
+def test_get_messages_returns_the_chat_turn_in_order(client):
+    events = chat(client, message="How do I index this?")
+    conversation_id = events[0]["conversation_id"]
+
+    response = client.get(f"/api/conversations/{conversation_id}/messages")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["conversation_id"] == conversation_id
+    assert [(m["role"], m["content"]) for m in body["messages"]] == [
+        ("user", "How do I index this?"),
+        ("assistant", "Hello there"),
+    ]
+    for message in body["messages"]:
+        assert isinstance(message["created_at"], str) and message["created_at"]
+
+
+def test_get_messages_unknown_conversation_is_404(client):
+    response = client.get("/api/conversations/nope/messages")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Conversation not found"}
+
+
+def test_get_messages_empty_conversation_returns_empty_list(client, db):
+    db.create_conversation("empty")
+
+    response = client.get("/api/conversations/empty/messages")
+
+    assert response.status_code == 200
+    assert response.json() == {"conversation_id": "empty", "messages": []}
+
+
 def test_chat_sends_system_prompt_and_history_to_the_provider(client, provider):
     conversation_id = chat(client, message="First")[0]["conversation_id"]
     events = chat(client, conversation_id=conversation_id, message="Second")

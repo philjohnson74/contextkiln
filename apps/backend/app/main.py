@@ -81,6 +81,16 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
 
+    @app.get("/api/conversations/{conversation_id}/messages")
+    def get_messages(conversation_id: str) -> dict:
+        """Return a conversation's messages, oldest first."""
+        if not db.conversation_exists(conversation_id):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {
+            "conversation_id": conversation_id,
+            "messages": db.list_messages_with_timestamps(conversation_id),
+        }
+
     @app.post("/api/escalations", status_code=201)
     def create_escalation(request: EscalationRequest) -> dict:
         """Record a request for human help. Without a summary, the latest question is used."""

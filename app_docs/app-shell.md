@@ -27,6 +27,7 @@ Set these in `.env` or the environment. All are optional.
 
 - `GET /health` returns `{"status": "ok"}`.
 - `POST /api/chat` takes `{conversation_id?, message}` and streams NDJSON: a `conversation` event, then `delta` events, then `done` or `error`. An unknown `conversation_id` returns 404.
+- `GET /api/conversations/{conversation_id}/messages` returns `{conversation_id, messages}`, where each message is `{role, content, created_at}`, oldest first. An unknown id returns 404 and an empty conversation returns an empty list.
 - `POST /api/escalations` takes `{conversation_id, summary?}` and returns the new row with status `open`. Without a summary, it uses the latest user message.
 
 ## See escalations

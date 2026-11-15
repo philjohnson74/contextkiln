@@ -75,6 +75,19 @@ class Database:
             ).fetchall()
         return [{"role": row["role"], "content": row["content"]} for row in rows]
 
+    def list_messages_with_timestamps(self, conversation_id: str) -> list[dict[str, str]]:
+        """Like `list_messages` plus `created_at`; that one stays role and content only because it goes to the model."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT role, content, created_at FROM messages "
+                "WHERE conversation_id = ? ORDER BY id",
+                (conversation_id,),
+            ).fetchall()
+        return [
+            {"role": row["role"], "content": row["content"], "created_at": row["created_at"]}
+            for row in rows
+        ]
+
     def create_escalation(self, conversation_id: str, summary: str) -> dict:
         with self._connect() as conn:
             row = conn.execute(
