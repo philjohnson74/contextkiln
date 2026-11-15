@@ -2,6 +2,14 @@
 
 A chat page for software engineering and infrastructure questions, with a "Talk to a human" button. There's no auth, payment or human dashboard yet.
 
+## Conversation sidebar
+
+The left-hand sidebar lists past conversations (newest first) and allows switching between them. Clicking one loads its messages into the chat and makes it the active conversation. A "New conversation" button resets the chat to the empty state. After the first reply in a new conversation finishes, the list refreshes so the new conversation appears at the top, highlighted. On screens under 640px the sidebar sits above the chat.
+
+The sidebar is implemented in `Sidebar.tsx` and uses the following API helpers:
+- `listConversations()` - fetches the conversation list from `/api/conversations`
+- `getMessages(id)` - fetches messages for a specific conversation from `/api/conversations/{id}/messages`
+
 ## Run it
 
 Start Ollama and pull the default model (`ollama pull qwen3:4b`), then:
