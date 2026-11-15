@@ -91,6 +91,11 @@ def create_app(settings: Settings | None = None, provider: LLMProvider | None = 
             "messages": db.list_messages_with_timestamps(conversation_id),
         }
 
+    @app.get("/api/conversations")
+    def list_conversations() -> dict:
+        """Return all conversations, newest first."""
+        return {"conversations": db.list_conversations()}
+
     @app.post("/api/escalations", status_code=201)
     def create_escalation(request: EscalationRequest) -> dict:
         """Record a request for human help. Without a summary, the latest question is used."""

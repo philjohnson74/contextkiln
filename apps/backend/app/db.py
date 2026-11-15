@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS escalations (
 );
 """
 
+TITLE_MAX_CHARS = 60
+NEW_CONVERSATION_TITLE = "New conversation"
+
 
 class Database:
     def __init__(self, path: Path) -> None:
@@ -87,6 +90,39 @@ class Database:
             {"role": row["role"], "content": row["content"], "created_at": row["created_at"]}
             for row in rows
         ]
+
+    def list_conversations(self) -> list[dict]:
+        """List conversations newest first, ties broken by insertion order, one query for all conversations."""
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT c.id, c.created_at,
+                       (SELECT m.content FROM messages m
+                         WHERE m.conversation_id = c.id AND m.role = 'user'
+                         ORDER BY m.id LIMIT 1) AS first_message,
+                       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
+                FROM conversations c
+                ORDER BY c.created_at DESC, c.rowid DESC
+            """).fetchall()
+
+        conversations = []
+        for row in rows:
+            # Process title according to rules
+            first_message = row["first_message"]
+            if first_message is None:
+                title = NEW_CONVERSATION_TITLE
+            elif len(first_message) <= TITLE_MAX_CHARS:
+                title = first_message
+            else:
+                title = first_message[:TITLE_MAX_CHARS - 1] + "…"
+
+            conversations.append({
+                "id": row["id"],
+                "created_at": row["created_at"],
+                "title": title,
+                "message_count": row["message_count"]
+            })
+
+        return conversations
 
     def create_escalation(self, conversation_id: str, summary: str) -> dict:
         with self._connect() as conn:
