@@ -63,6 +63,7 @@ export default function App() {
       setEscalationId(null);
       setEscalating(false);
     } catch {
+      if (seq !== loadSeq.current) return;
       setError("Couldn't load that conversation.");
     }
   }
