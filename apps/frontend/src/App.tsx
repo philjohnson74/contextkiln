@@ -89,9 +89,14 @@ export default function App() {
     setMessages((current) => [...current, { role: "user", content: message }]);
 
     const isNew = conversationId === null;
+    let created = false;
     try {
       await streamChat(message, conversationId, (chatEvent) => {
-        if (chatEvent.type === "conversation") setConversationId(chatEvent.conversation_id);
+        if (chatEvent.type === "conversation") {
+          created = true;
+          activeConversationRef.current = chatEvent.conversation_id;
+          setConversationId(chatEvent.conversation_id);
+        }
         if (chatEvent.type === "delta") appendToReply(chatEvent.text);
         if (chatEvent.type === "error") setError(chatEvent.message);
       });
@@ -99,8 +104,8 @@ export default function App() {
       setError("Couldn't reach ContextKiln. Please try again.");
     } finally {
       setStreaming(false);
-      // Refresh conversations after the first reply in a new conversation
-      if (isNew && !error) {
+      // Refresh conversations once the backend has created a new conversation
+      if (isNew && created) {
         refreshConversations();
       }
     }
@@ -108,15 +113,18 @@ export default function App() {
 
   async function escalate() {
     if (!conversationId) return;
+    const escalatedId = conversationId;
     setError(null);
     setEscalating(true);
     try {
-      const escalation = await createEscalation(conversationId);
+      const escalation = await createEscalation(escalatedId);
+      if (activeConversationRef.current !== escalatedId) return;
       setEscalationId(escalation.id);
     } catch {
+      if (activeConversationRef.current !== escalatedId) return;
       setError("Couldn't send your request to a human. Please try again.");
     } finally {
-      setEscalating(false);
+      if (activeConversationRef.current === escalatedId) setEscalating(false);
     }
   }
 

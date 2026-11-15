@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import { streamChat, type ChatEvent } from "./api";
+import { getMessages, listConversations, streamChat, type ChatEvent } from "./api";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -35,9 +35,68 @@ async function ask(message: string) {
 }
 
 function requestBody(url: string) {
-  const call = fetchMock.mock.calls.find(([callUrl]) => callUrl === url);
+  const call = fetchMock.mock.calls.filter(([callUrl]) => callUrl === url).at(-1);
   if (!call) return null;
   return JSON.parse(call[1]?.body as string);
+}
+
+interface Summary {
+  id: string;
+  created_at: string;
+  title: string;
+  message_count: number;
+}
+
+function summary(id: string, title: string): Summary {
+  return { id, created_at: "2023-01-01T00:00:00Z", title, message_count: 2 };
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status });
+}
+
+function storedMessages(id: string, ...pairs: [string, string][]) {
+  return {
+    conversation_id: id,
+    messages: pairs.map(([role, content]) => ({ role, content, created_at: "2023-01-01T00:00:00Z" })),
+  };
+}
+
+interface Routes {
+  lists?: Summary[][]; // successive GET /api/conversations responses; the last one repeats
+  listStatus?: number;
+  messages?: Record<string, () => Response | Promise<Response>>;
+  chat?: () => Response | Promise<Response>;
+  escalation?: () => Response | Promise<Response>;
+}
+
+function route(routes: Routes = {}) {
+  let listCalls = 0;
+  fetchMock.mockImplementation(async (input) => {
+    const url = String(input);
+    if (url === "/api/conversations") {
+      if (routes.listStatus) return new Response("error", { status: routes.listStatus });
+      const lists = routes.lists ?? [[]];
+      const list = lists[Math.min(listCalls++, lists.length - 1)];
+      return json({ conversations: list });
+    }
+    const match = url.match(/^\/api\/conversations\/([^/]+)\/messages$/);
+    if (match) {
+      const handler = routes.messages?.[decodeURIComponent(match[1])];
+      return handler ? handler() : new Response("missing", { status: 404 });
+    }
+    if (url === "/api/chat") return routes.chat ? routes.chat() : ndjson([REPLY]);
+    if (url === "/api/escalations") {
+      return routes.escalation
+        ? routes.escalation()
+        : json({ id: 7, conversation_id: "c1", summary: "Hi", status: "open", created_at: "now" }, 201);
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+}
+
+function callsTo(url: string) {
+  return fetchMock.mock.calls.filter(([callUrl]) => callUrl === url);
 }
 
 beforeEach(() => {
@@ -67,9 +126,40 @@ describe("streamChat", () => {
   });
 });
 
+describe("listConversations", () => {
+  it("returns the parsed conversations", async () => {
+    fetchMock.mockResolvedValue(json({ conversations: [summary("c1", "One")] }));
+
+    await expect(listConversations()).resolves.toEqual([summary("c1", "One")]);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/conversations");
+  });
+
+  it("throws on an error status", async () => {
+    fetchMock.mockResolvedValue(new Response("nope", { status: 500 }));
+
+    await expect(listConversations()).rejects.toThrow("500");
+  });
+});
+
+describe("getMessages", () => {
+  it("returns the parsed messages", async () => {
+    const body = storedMessages("a/b", ["user", "Hi"]);
+    fetchMock.mockResolvedValue(json(body));
+
+    await expect(getMessages("a/b")).resolves.toEqual(body.messages);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/conversations/a%2Fb/messages");
+  });
+
+  it("throws on an error status", async () => {
+    fetchMock.mockResolvedValue(new Response("nope", { status: 404 }));
+
+    await expect(getMessages("gone")).rejects.toThrow("404");
+  });
+});
+
 describe("App", () => {
   it("shows the question and the streamed reply", async () => {
-    fetchMock.mockResolvedValue(ndjson([REPLY]));
+    route();
     render(<App />);
 
     await ask("Why is this query slow?");
@@ -80,36 +170,46 @@ describe("App", () => {
   });
 
   it("sends the conversation id with follow-up messages", async () => {
-    fetchMock.mockResolvedValueOnce(ndjson([REPLY]));
-    fetchMock.mockResolvedValueOnce(ndjson([REPLY]));
+    route();
     render(<App />);
 
     await ask("First");
     await screen.findByText("Add an index.");
     await ask("Second");
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(callsTo("/api/chat")).toHaveLength(2));
     expect(requestBody("/api/chat")).toEqual({ conversation_id: "c1", message: "Second" });
   });
 
-  it("shows an error sent in the stream", async () => {
-    fetchMock.mockResolvedValue(
-      ndjson([
-        events(
-          { type: "conversation", conversation_id: "c1" },
-          { type: "error", message: "The model couldn't reply." },
-        ),
-      ]),
-    );
+  it("shows an error sent in the stream and does not refresh the list", async () => {
+    route({
+      chat: () => ndjson([events({ type: "error", message: "The model couldn't reply." })]),
+    });
     render(<App />);
 
     await ask("Hi");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The model couldn't reply.");
+    expect(callsTo("/api/conversations")).toHaveLength(1);
+  });
+
+  it("keeps a stream error after refreshing the list", async () => {
+    route({
+      chat: () =>
+        ndjson([
+          events({ type: "conversation", conversation_id: "c1" }, { type: "error", message: "The model couldn't reply." }),
+        ]),
+    });
+    render(<App />);
+
+    await ask("Hi");
+
+    await waitFor(() => expect(callsTo("/api/conversations")).toHaveLength(2));
+    expect(screen.getByRole("alert")).toHaveTextContent("The model couldn't reply.");
   });
 
   it("shows an error when the server can't be reached", async () => {
-    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    route({ chat: () => Promise.reject(new TypeError("Failed to fetch")) });
     render(<App />);
 
     await ask("Hi");
@@ -118,19 +218,14 @@ describe("App", () => {
   });
 
   it("disables escalation until a conversation exists", () => {
+    route();
     render(<App />);
 
     expect(screen.getByRole("button", { name: "Talk to a human" })).toBeDisabled();
   });
 
   it("escalates once and confirms", async () => {
-    fetchMock.mockResolvedValueOnce(ndjson([REPLY]));
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ id: 7, conversation_id: "c1", summary: "Hi", status: "open", created_at: "now" }),
-        { status: 201 },
-      ),
-    );
+    route();
     render(<App />);
 
     await ask("Hi");
@@ -139,14 +234,12 @@ describe("App", () => {
     await userEvent.click(button);
 
     expect(await screen.findByRole("status")).toHaveTextContent("reference #7");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/escalations");
     expect(requestBody("/api/escalations")).toEqual({ conversation_id: "c1" });
     expect(button).toBeDisabled();
   });
 
   it("lets the user retry a failed escalation", async () => {
-    fetchMock.mockResolvedValueOnce(ndjson([REPLY]));
-    fetchMock.mockResolvedValueOnce(new Response("error", { status: 500 }));
+    route({ escalation: () => new Response("error", { status: 500 }) });
     render(<App />);
 
     await ask("Hi");
@@ -158,223 +251,247 @@ describe("App", () => {
     expect(button).toBeEnabled();
   });
 
-  it("loads and shows conversation list on mount", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversations: [
-            { id: "c1", created_at: "2023-01-01T00:00:00Z", title: "First conversation", message_count: 2 },
-            { id: "c2", created_at: "2023-01-02T00:00:00Z", title: "Second conversation", message_count: 1 },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    fetchMock.mockResolvedValueOnce(ndjson([REPLY]));
+  it("lists conversations in API order inside the Conversations navigation", async () => {
+    route({ lists: [[summary("c2", "Second conversation"), summary("c1", "First conversation")]] });
     render(<App />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-
-    // Check that the sidebar has the conversation buttons
-    expect(screen.getByRole("button", { name: "New conversation" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "First conversation" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Second conversation" })).toBeInTheDocument();
+    const nav = await screen.findByRole("navigation", { name: "Conversations" });
+    const buttons = (await within(nav).findAllByRole("button")).map((b) => b.textContent);
+    expect(buttons).toEqual(["New conversation", "Second conversation", "First conversation"]);
   });
 
-  it("loads messages when selecting a conversation", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversations: [
-            { id: "c1", created_at: "2023-01-01T00:00:00Z", title: "First conversation", message_count: 2 },
-            { id: "c2", created_at: "2023-01-02T00:00:00Z", title: "Second conversation", message_count: 1 },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversation_id: "c2",
-          messages: [
-            { role: "user", content: "Hello", created_at: "2023-01-02T00:00:00Z" },
-            { role: "assistant", content: "Hi there!", created_at: "2023-01-02T00:00:00Z" },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
+  it("shows an empty sidebar with a New conversation button", async () => {
+    route();
     render(<App />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const nav = await screen.findByRole("navigation", { name: "Conversations" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(1);
+    expect(within(nav).getByRole("button", { name: "New conversation" })).toBeEnabled();
+  });
 
-    // Select conversation c2
-    const conversationButton = screen.getByRole("button", { name: "Second conversation" });
-    await userEvent.click(conversationButton);
+  it("loads a conversation's messages and continues it", async () => {
+    route({
+      lists: [[summary("c2", "Second conversation"), summary("c1", "First conversation")]],
+      messages: { c2: () => json(storedMessages("c2", ["user", "Hello"], ["assistant", "Hi there!"])) },
+    });
+    render(<App />);
 
-    // Check that the messages are displayed
+    await userEvent.click(await screen.findByRole("button", { name: "Second conversation" }));
+
     expect(await screen.findByText("Hi there!")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Second conversation" })).toHaveAttribute(
-      "aria-current",
-      "true"
-    );
+    expect(screen.getByText("Hello")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Second conversation" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "First conversation" })).not.toHaveAttribute("aria-current");
+
+    await ask("Next");
+    await waitFor(() => expect(callsTo("/api/chat")).toHaveLength(1));
+    expect(requestBody("/api/chat")).toEqual({ conversation_id: "c2", message: "Next" });
   });
 
-  it("creates a new conversation and clears the chat", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversations: [
-            { id: "c1", created_at: "2023-01-01T00:00:00Z", title: "First conversation", message_count: 2 },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    fetchMock.mockResolvedValueOnce(ndjson([REPLY]));
+  it("does nothing when clicking the already-open conversation", async () => {
+    route({
+      lists: [[summary("c1", "First conversation")]],
+      messages: { c1: () => json(storedMessages("c1", ["user", "Hello"])) },
+    });
     render(<App />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const button = await screen.findByRole("button", { name: "First conversation" });
+    await userEvent.click(button);
+    await screen.findByText("Hello");
+    await userEvent.click(button);
 
-    // Create a new conversation
-    const newConversationButton = screen.getByRole("button", { name: "New conversation" });
-    await userEvent.click(newConversationButton);
+    expect(callsTo("/api/conversations/c1/messages")).toHaveLength(1);
+  });
 
-    // Check that the chat is cleared
+  it("starts a new conversation with a cleared chat", async () => {
+    route({ lists: [[summary("c1", "First conversation")]] });
+    render(<App />);
+
+    await ask("Hi");
+    await screen.findByText("Add an index.");
+    await userEvent.click(screen.getByRole("button", { name: "New conversation" }));
+
     expect(screen.queryByText("Add an index.")).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Ask a question")).toBeInTheDocument();
+    expect(screen.getByText("Ask a software engineering or infrastructure question.")).toBeInTheDocument();
+
+    await ask("Again");
+    await waitFor(() => expect(callsTo("/api/chat")).toHaveLength(2));
+    expect(requestBody("/api/chat")).toEqual({ conversation_id: null, message: "Again" });
   });
 
-  it("refreshes conversation list after first reply in new conversation", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversations: [
-            { id: "c1", created_at: "2023-01-01T00:00:00Z", title: "First conversation", message_count: 2 },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    fetchMock.mockResolvedValueOnce(ndjson([REPLY]));
-    // Mock the second call to get conversations with the new conversation at the top
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversations: [
-            { id: "c_new", created_at: "2023-01-03T00:00:00Z", title: "New conversation", message_count: 1 },
-            { id: "c1", created_at: "2023-01-01T00:00:00Z", title: "First conversation", message_count: 2 },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
+  it("refreshes the list after the first reply and highlights the new conversation", async () => {
+    route({
+      lists: [[summary("c0", "Older")], [summary("c1", "New question"), summary("c0", "Older")]],
+    });
     render(<App />);
+    await screen.findByRole("button", { name: "Older" });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-
-    // Send a new message to create a new conversation
     await ask("New question");
 
-    // Check that refresh was called after the first reply
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+    const nav = screen.getByRole("navigation", { name: "Conversations" });
+    await waitFor(() => expect(within(nav).getAllByRole("button")[1]).toHaveTextContent("New question"));
+    expect(within(nav).getByRole("button", { name: "New question" })).toHaveAttribute("aria-current", "true");
+    expect(callsTo("/api/conversations")).toHaveLength(2);
+  });
+
+  it("disables the sidebar while a reply streams", async () => {
+    let finish!: () => void;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(events({ type: "conversation", conversation_id: "c9" })));
+        finish = () => {
+          controller.enqueue(encoder.encode(events({ type: "done" })));
+          controller.close();
+        };
+      },
     });
+    route({ lists: [[summary("c1", "First conversation")]], chat: () => new Response(body, { status: 200 }) });
+    render(<App />);
+    await screen.findByRole("button", { name: "First conversation" });
+
+    await ask("Hi");
+
+    expect(screen.getByRole("button", { name: "First conversation" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "New conversation" })).toBeDisabled();
+
+    finish();
+    await waitFor(() => expect(screen.getByRole("button", { name: "New conversation" })).toBeEnabled());
   });
 
-  it("disables conversation buttons and 'New conversation' while streaming", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversations: [
-            { id: "c1", created_at: "2023-01-01T00:00:00Z", title: "First conversation", message_count: 2 },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-
-    // Mock a streaming response that takes a while
-    const streamResponse = new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode(events({ type: "delta", text: "Thinking..." })));
-          setTimeout(() => {
-            controller.enqueue(new TextEncoder().encode(events({ type: "done" })));
-            controller.close();
-          }, 100);
-        },
-      }),
-      { status: 200 }
-    );
-
-    fetchMock.mockResolvedValueOnce(streamResponse);
+  it("resets escalation when switching conversations", async () => {
+    route({
+      lists: [[summary("c1", "First conversation"), summary("c2", "Second conversation")]],
+      messages: {
+        c1: () => json(storedMessages("c1", ["user", "A"])),
+        c2: () => json(storedMessages("c2", ["user", "B"])),
+      },
+    });
     render(<App />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await userEvent.click(await screen.findByRole("button", { name: "First conversation" }));
+    await screen.findByText("A");
+    await userEvent.click(screen.getByRole("button", { name: "Talk to a human" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("reference #7");
 
-    // Send a message
-    await ask("Test question");
+    await userEvent.click(screen.getByRole("button", { name: "Second conversation" }));
+    await screen.findByText("B");
 
-    // Check that the conversation button is disabled during streaming
-    const conversationButton = screen.getByRole("button", { name: "First conversation" });
-    expect(conversationButton).toBeDisabled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Talk to a human" })).toBeEnabled();
   });
 
-  it("clears error when switching conversations", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversations: [
-            { id: "c1", created_at: "2023-01-01T00:00:00Z", title: "First conversation", message_count: 2 },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          conversation_id: "c1",
-          messages: [
-            { role: "user", content: "Hello", created_at: "2023-01-01T00:00:00Z" },
-            { role: "assistant", content: "Hi there!", created_at: "2023-01-01T00:00:00Z" },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
+  it("ignores an escalation that finishes after switching conversations", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    route({
+      lists: [[summary("c1", "First conversation"), summary("c2", "Second conversation")]],
+      messages: {
+        c1: () => json(storedMessages("c1", ["user", "A"])),
+        c2: () => json(storedMessages("c2", ["user", "B"])),
+      },
+      escalation: async () => {
+        await gate;
+        return json({ id: 7, conversation_id: "c1", summary: "A", status: "open", created_at: "now" }, 201);
+      },
+    });
     render(<App />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await userEvent.click(await screen.findByRole("button", { name: "First conversation" }));
+    await screen.findByText("A");
+    await userEvent.click(screen.getByRole("button", { name: "Talk to a human" }));
+    await userEvent.click(screen.getByRole("button", { name: "Second conversation" }));
+    await screen.findByText("B");
 
-    // Simulate an error by manually setting one
-    const appElement = screen.getByRole("main");
-    appElement.setAttribute("aria-live", "polite");
-    const errorElement = document.createElement("p");
-    errorElement.className = "error";
-    errorElement.role = "alert";
-    errorElement.textContent = "Test error";
-    appElement.appendChild(errorElement);
+    release();
+    await waitFor(() => expect(callsTo("/api/escalations")).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
-    // Select a conversation
-    const conversationButton = screen.getByRole("button", { name: "First conversation" });
-    await userEvent.click(conversationButton);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Talk to a human" })).toBeEnabled();
+  });
 
-    // Check that the error is cleared
+  it("clears an existing error when switching conversations", async () => {
+    route({
+      lists: [[summary("c1", "First conversation")]],
+      chat: () => ndjson([events({ type: "error", message: "Test error" })]),
+      messages: { c1: () => json(storedMessages("c1", ["user", "Hello"])) },
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: "First conversation" });
+
+    await ask("Hi");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Test error");
+
+    await userEvent.click(screen.getByRole("button", { name: "First conversation" }));
+    await screen.findByText("Hello");
+
     expect(screen.queryByText("Test error")).not.toBeInTheDocument();
   });
 
-  it("shows error when failed to load conversations", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response("error", { status: 500 }),
-    );
+  it("only applies the last of several rapid conversation clicks", async () => {
+    let releaseFirst!: () => void;
+    const slow = new Promise<void>((resolve) => (releaseFirst = resolve));
+    route({
+      lists: [[summary("c1", "First conversation"), summary("c2", "Second conversation")]],
+      messages: {
+        c1: async () => {
+          await slow;
+          return json(storedMessages("c1", ["user", "From first"]));
+        },
+        c2: () => json(storedMessages("c2", ["user", "From second"])),
+      },
+    });
     render(<App />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await userEvent.click(await screen.findByRole("button", { name: "First conversation" }));
+    await userEvent.click(screen.getByRole("button", { name: "Second conversation" }));
+    await screen.findByText("From second");
+    releaseFirst();
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
-    // Check that the error is displayed
+    expect(screen.queryByText("From first")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Second conversation" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("cancels a pending load when starting a new conversation", async () => {
+    let release!: () => void;
+    const slow = new Promise<void>((resolve) => (release = resolve));
+    route({
+      lists: [[summary("c1", "First conversation")]],
+      messages: {
+        c1: async () => {
+          await slow;
+          return json(storedMessages("c1", ["user", "Late"]));
+        },
+      },
+    });
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "First conversation" }));
+    await userEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(screen.queryByText("Late")).not.toBeInTheDocument();
+  });
+
+  it("shows an error when the conversation list fails to load", async () => {
+    route({ listStatus: 500 });
+    render(<App />);
+
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load your conversations.");
+  });
+
+  it("shows an error and keeps the current chat when messages fail to load", async () => {
+    route({ lists: [[summary("c2", "Second conversation")]] });
+    render(<App />);
+
+    await ask("Hi");
+    await screen.findByText("Add an index.");
+    await userEvent.click(await screen.findByRole("button", { name: "Second conversation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load that conversation.");
+    expect(screen.getByText("Add an index.")).toBeInTheDocument();
   });
 });
